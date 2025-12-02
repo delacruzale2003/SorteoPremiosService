@@ -1,0 +1,11 @@
+/node_modules
+
+# Archivos de Entorno y Log
+.env
+*.log
+
+# Archivos de Compilación de TypeScript
+/dist
+
+# OS generated files
+.DS_Store

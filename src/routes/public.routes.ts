@@ -1,0 +1,160 @@
+import { Router } from 'express';
+import { transaction, query } from '../db'; // Asegúrate de importar 'query'
+import { randomUUID } from 'crypto';
+
+const publicRouter = Router();
+
+// ====================================================================
+// CONFIGURACIÓN DE LÍMITE DE PREMIOS POR PERSONA (Fácil de cambiar)
+// ====================================================================
+// Define el número máximo de premios que una persona puede reclamar
+const MAX_PRIZES_PER_PERSON = 1; 
+
+
+// Define la estructura del premio para la lógica de sorteo
+interface PrizeForDraw {
+    id: string;
+    name: string;
+    available_stock: number;
+}
+
+/**
+ * Función para seleccionar un premio basado en su peso (stock disponible).
+ * Los premios con mayor available_stock tienen mayor probabilidad de ser seleccionados.
+ * @param prizes Array de objetos PrizeForDraw.
+ * @returns El objeto PrizeForDraw seleccionado.
+ */
+function weightedRandom(prizes: PrizeForDraw[]): PrizeForDraw {
+    // 1. Calcular el total del stock disponible (el peso total)
+    const totalWeight = prizes.reduce((sum, prize) => sum + prize.available_stock, 0);
+
+    if (totalWeight === 0) {
+        // Esto no debería pasar si la consulta SQL es correcta, pero es un buen control.
+        throw new Error('No hay stock disponible para sortear.');
+    }
+
+    // 2. Elegir un número aleatorio entre 0 y el peso total
+    let randomNumber = Math.random() * totalWeight;
+
+    // 3. Iterar sobre los premios y restar su peso hasta encontrar el ganador
+    for (const prize of prizes) {
+        randomNumber -= prize.available_stock;
+        if (randomNumber <= 0) {
+            return prize; // ¡Este es el premio ganador!
+        }
+    }
+
+    // Fallback: Si por alguna razón el loop termina sin seleccionar (debería ser imposible)
+    return prizes[prizes.length - 1]; 
+}
+
+// ====================================================================
+// RUTA CRÍTICA: FORMULARIO DE RECLAMO Y ENTREGA INMEDIATA
+// ====================================================================
+
+/**
+ * Endpoint para el registro del usuario y entrega del premio.
+ * URL: POST /api/v1/claim
+ * Body esperado: { name: string, storeId: string, campaign: string }
+ * * CRÍTICO: Ahora usa sorteo ponderado antes de la transacción.
+ */
+publicRouter.post('/claim', async (req, res) => {
+    const { name, storeId, campaign } = req.body;
+
+    if (!name || !storeId || !campaign) {
+        return res.status(400).json({ message: 'Faltan datos requeridos (name, storeId, campaign).' });
+    }
+
+    let prizeName = 'N/A';
+    let assignedPrizeId: string;
+    let newRegisterId: string = randomUUID(); 
+
+    try {
+        // === NUEVO PASO: VERIFICACIÓN DE LÍMITE POR PERSONA ===
+        const [countRows] = await query(`
+            SELECT COUNT(id) AS prize_count FROM registers WHERE name = ? AND campaign = ?;
+        `, [name, campaign]);
+        
+        const countResult = (countRows as { prize_count: number }[])[0].prize_count;
+        
+        if (countResult >= MAX_PRIZES_PER_PERSON) {
+            return res.status(403).json({ 
+                message: `Límite alcanzado. Ya has reclamado ${MAX_PRIZES_PER_PERSON} premio(s) en esta campaña.` 
+            });
+        }
+        // =======================================================
+        
+
+        // === PASO A: SELECCIÓN DE PREMIO CON SORTEO PONDERADO ===
+        
+        // 1. Obtener TODOS los premios disponibles y su stock.
+        const [availablePrizesRows] = await query<PrizeForDraw>(`
+            SELECT id, name, available_stock 
+            FROM prizes 
+            WHERE store_id = ? AND available_stock > 0;
+        `, [storeId]);
+        
+        const availablePrizes = availablePrizesRows as PrizeForDraw[];
+
+        if (availablePrizes.length === 0) {
+            return res.status(409).json({ message: 'Lo sentimos, los premios para esta tienda se han agotado.' });
+        }
+
+        // 2. Realizar el sorteo para elegir el premio basado en la cantidad de stock
+        const winningPrize = weightedRandom(availablePrizes);
+        
+        assignedPrizeId = winningPrize.id;
+        prizeName = winningPrize.name;
+
+        // === PASO B: INICIAR TRANSACCIÓN Y DECREMENTAR STOCK ===
+
+        // Ejecutamos la lógica de stock y registro dentro de una transacción.
+        await transaction(async (connection) => {
+            
+            // 1. VERIFICAR y BLOQUEAR la fila del premio GANADOR. 
+            const [prizeCheckRows] = await connection.execute(`
+                SELECT available_stock
+                FROM prizes
+                WHERE id = ? AND available_stock > 0
+                FOR UPDATE; -- Bloquea la fila del premio ganador
+            `, [assignedPrizeId]);
+            
+            if ((prizeCheckRows as any[]).length === 0) {
+                // Si la verificación falla (alguien más tomó el último stock), forzamos un rollback.
+                throw new Error('STOCK_LOST'); 
+            }
+
+            // 2. Decrementar el stock disponible atómicamente para el premio ganador
+            await connection.execute(`
+                UPDATE prizes
+                SET available_stock = available_stock - 1,
+                    updated_at = NOW()
+                WHERE id = ?;
+            `, [assignedPrizeId]);
+
+            // 3. Registrar la entrega
+            await connection.execute(`
+                INSERT INTO registers (id, name, store_id, prize_id, campaign, status)
+                VALUES (?, ?, ?, ?, ?, 'CLAIMED');
+            `, [newRegisterId, name, storeId, assignedPrizeId, campaign]);
+        });
+
+        res.status(200).json({
+            message: '¡Premio entregado con éxito!',
+            prize: prizeName,
+            registerId: newRegisterId 
+        });
+
+    } catch (error) {
+        if (error instanceof Error) {
+            if (error.message === 'NO_STOCK' || error.message === 'STOCK_LOST') {
+                return res.status(409).json({ message: 'Lo sentimos, los premios para esta tienda se han agotado o fueron tomados justo ahora. Inténtelo de nuevo.' });
+            }
+        }
+        
+        console.error('Error en el reclamo de premio:', error);
+        res.status(500).json({ message: 'Error interno del servidor durante el proceso de reclamo.' });
+    }
+});
+
+export default publicRouter;
