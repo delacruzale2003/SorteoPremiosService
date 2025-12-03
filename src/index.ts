@@ -4,7 +4,7 @@ import cors from 'cors';
 import { testDbConnection } from './db'; 
 import adminRouter from './routes/admin.routes';
 import publicRouter from './routes/public.routes'; 
-
+import path from "path";
 dotenv.config();
 
 const app = express();
@@ -37,7 +37,7 @@ app.get('/', (req: Request, res: Response) => {
 // ====================================================================
 app.use('/api/v1/admin', adminRouter); 
 app.use('/api/v1', publicRouter);
-
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 // ====================================================================
 // INICIALIZACIÓN DEL SERVIDOR
 // ====================================================================
