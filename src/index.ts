@@ -14,17 +14,25 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 // Habilitar CORS
+const allowedOrigins = [
+    // 1. Entorno de Desarrollo (Vite por defecto)
+    "http://localhost:5173", 
+    "http://localhost:5174",
+    
+    // 2. Entorno de Producción (Dominio de Render para el Frontend, aunque apunta al dominio principal)
+    "https://ccpremiosdic.onrender.com", 
+    
+    // 3. Dominio Personalizado Final (El que usa el usuario)
+    "https://cocacolanavidadpromo.ptm.pe",
+    // 4. Si el certificado SSL aún es intermitente, permite HTTP temporalmente.
+    "http://cocacolanavidadpromo.ptm.pe" 
+];
+
+
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5174", // tu frontend en desarrollo
-    "https://tu-frontend-en-produccion.com",
-    "https://ccpremiosdic.onrender.com/",
-    "https://cocacolanavidadpromo.ptm.pe/",
-    "http://cocacolanavidadpromo.ptm.pe/"// tu dominio en producción
-  ],
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  origin: allowedOrigins,
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
 // Endpoint de prueba
