@@ -20,7 +20,8 @@ app.use(cors({
     "http://localhost:5174", // tu frontend en desarrollo
     "https://tu-frontend-en-produccion.com",
     "https://ccpremiosdic.onrender.com/",
-    "https://cocacolanavidadpromo.ptm.pe/"// tu dominio en producción
+    "https://cocacolanavidadpromo.ptm.pe/",
+    "http://cocacolanavidadpromo.ptm.pe/"// tu dominio en producción
   ],
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization"]
