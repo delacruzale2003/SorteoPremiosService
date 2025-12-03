@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { transaction, query } from '../db'; // Asegúrate de importar 'query'
+import { transaction, query } from '../db';
 import { randomUUID } from 'crypto';
 
 const publicRouter = Router();
@@ -11,7 +11,6 @@ const publicRouter = Router();
 const MAX_PRIZES_PER_PERSON = 1; 
 
 
-// Define la estructura del premio para la lógica de sorteo
 interface PrizeForDraw {
     id: string;
     name: string;
@@ -21,18 +20,15 @@ interface PrizeForDraw {
 /**
  * Función para seleccionar un premio basado en su peso (stock disponible).
  * Los premios con mayor available_stock tienen mayor probabilidad de ser seleccionados.
- * @param prizes Array de objetos PrizeForDraw.
- * @returns El objeto PrizeForDraw seleccionado.
  */
 function weightedRandom(prizes: PrizeForDraw[]): PrizeForDraw {
     // 1. Calcular el total del stock disponible (el peso total)
     const totalWeight = prizes.reduce((sum, prize) => sum + prize.available_stock, 0);
-
+    
     if (totalWeight === 0) {
-        // Esto no debería pasar si la consulta SQL es correcta, pero es un buen control.
         throw new Error('No hay stock disponible para sortear.');
     }
-
+    
     // 2. Elegir un número aleatorio entre 0 y el peso total
     let randomNumber = Math.random() * totalWeight;
 
@@ -40,11 +36,9 @@ function weightedRandom(prizes: PrizeForDraw[]): PrizeForDraw {
     for (const prize of prizes) {
         randomNumber -= prize.available_stock;
         if (randomNumber <= 0) {
-            return prize; // ¡Este es el premio ganador!
+            return prize; 
         }
     }
-
-    // Fallback: Si por alguna razón el loop termina sin seleccionar (debería ser imposible)
     return prizes[prizes.length - 1]; 
 }
 
@@ -55,12 +49,13 @@ function weightedRandom(prizes: PrizeForDraw[]): PrizeForDraw {
 /**
  * Endpoint para el registro del usuario y entrega del premio.
  * URL: POST /api/v1/claim
- * Body esperado: { name: string, storeId: string, campaign: string }
- * * CRÍTICO: Ahora usa sorteo ponderado antes de la transacción.
+ * Body esperado: { name: string, storeId: string, campaign: string, photoUrl?: string, phoneNumber?: string }
  */
 publicRouter.post('/claim', async (req, res) => {
-    const { name, storeId, campaign } = req.body;
+    // Los campos photoUrl y phoneNumber son opcionales en el body
+    const { name, storeId, campaign, photoUrl, phoneNumber } = req.body; 
 
+    // Validación Básica (requeridos para cualquier registro)
     if (!name || !storeId || !campaign) {
         return res.status(400).json({ message: 'Faltan datos requeridos (name, storeId, campaign).' });
     }
@@ -69,24 +64,36 @@ publicRouter.post('/claim', async (req, res) => {
     let assignedPrizeId: string;
     let newRegisterId: string = randomUUID(); 
 
+    // Normalizar a NULL si están vacíos. Esto es clave para la columna NULLABLE de MySQL.
+    const finalPhotoUrl = photoUrl || null;
+    const finalPhoneNumber = phoneNumber || null;
+
+
     try {
-        // === NUEVO PASO: VERIFICACIÓN DE LÍMITE POR PERSONA ===
+        // === VERIFICACIÓN DE LÍMITE POR PERSONA ===
+        // Usamos el número de teléfono como identificador primario para el límite.
+        // Si el número es NULL, usamos el nombre como fallback.
+        const limitIdentifier = finalPhoneNumber ? finalPhoneNumber : name;
+        
+        // Consulta para contar registros: usa phone_number si existe, si no, usa el name.
         const [countRows] = await query(`
-            SELECT COUNT(id) AS prize_count FROM registers WHERE name = ? AND campaign = ?;
-        `, [name, campaign]);
+            SELECT COUNT(id) AS prize_count FROM registers 
+            WHERE 
+                (phone_number = ? OR (phone_number IS NULL AND name = ?)) 
+                AND campaign = ?;
+        `, [limitIdentifier, name, campaign]);
         
         const countResult = (countRows as { prize_count: number }[])[0].prize_count;
         
         if (countResult >= MAX_PRIZES_PER_PERSON) {
             return res.status(403).json({ 
-                message: `Límite alcanzado. Ya has reclamado ${MAX_PRIZES_PER_PERSON} premio(s) en esta campaña.` 
+                message: `Límite alcanzado. Ya has reclamado ${MAX_PRIZES_PER_PERSON} premio(s) con este identificador en esta campaña.` 
             });
         }
         // =======================================================
         
 
         // === PASO A: SELECCIÓN DE PREMIO CON SORTEO PONDERADO ===
-        
         // 1. Obtener TODOS los premios disponibles y su stock.
         const [availablePrizesRows] = await query<PrizeForDraw>(`
             SELECT id, name, available_stock 
@@ -108,23 +115,22 @@ publicRouter.post('/claim', async (req, res) => {
 
         // === PASO B: INICIAR TRANSACCIÓN Y DECREMENTAR STOCK ===
 
-        // Ejecutamos la lógica de stock y registro dentro de una transacción.
         await transaction(async (connection) => {
             
-            // 1. VERIFICAR y BLOQUEAR la fila del premio GANADOR. 
+            // 1. VERIFICAR y BLOQUEAR la fila del premio GANADOR (para asegurar el stock).
             const [prizeCheckRows] = await connection.execute(`
                 SELECT available_stock
                 FROM prizes
                 WHERE id = ? AND available_stock > 0
-                FOR UPDATE; -- Bloquea la fila del premio ganador
+                FOR UPDATE;
             `, [assignedPrizeId]);
             
             if ((prizeCheckRows as any[]).length === 0) {
-                // Si la verificación falla (alguien más tomó el último stock), forzamos un rollback.
+                // El stock fue tomado por otra persona justo ahora.
                 throw new Error('STOCK_LOST'); 
             }
 
-            // 2. Decrementar el stock disponible atómicamente para el premio ganador
+            // 2. Decrementar el stock disponible atómicamente
             await connection.execute(`
                 UPDATE prizes
                 SET available_stock = available_stock - 1,
@@ -132,11 +138,11 @@ publicRouter.post('/claim', async (req, res) => {
                 WHERE id = ?;
             `, [assignedPrizeId]);
 
-            // 3. Registrar la entrega
+            // 3. Registrar la entrega (USAMOS los valores finalizados)
             await connection.execute(`
-                INSERT INTO registers (id, name, store_id, prize_id, campaign, status)
-                VALUES (?, ?, ?, ?, ?, 'CLAIMED');
-            `, [newRegisterId, name, storeId, assignedPrizeId, campaign]);
+                INSERT INTO registers (id, name, store_id, prize_id, campaign, status, photo_url, phone_number)
+                VALUES (?, ?, ?, ?, ?, 'CLAIMED', ?, ?);
+            `, [newRegisterId, name, storeId, assignedPrizeId, campaign, finalPhotoUrl, finalPhoneNumber]);
         });
 
         res.status(200).json({
