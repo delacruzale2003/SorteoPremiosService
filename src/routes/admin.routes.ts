@@ -240,58 +240,63 @@ adminRouter.post('/prizes', async (req: Request, res: Response) => {
  * GET /api/v1/admin/stores?page=1&limit=10&campaign=[nombre]
  */
 adminRouter.get('/stores', async (req: Request, res: Response) => {
-  try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
-    const offset = (page - 1) * limit;
-    // Extraemos el filtro de la URL
-    const campaignFilter = req.query.campaign as string | undefined;
+    try {
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 10;
+        const offset = (page - 1) * limit;
+        // Extraemos el filtro de la URL
+        const campaignFilter = req.query.campaign as string | undefined;
 
-    let whereClause = '';
-    const queryParams: (string | number)[] = [];
+        let whereClause = '';
+        const queryParams: (string | number)[] = [];
 
-    // Lógica para añadir el filtro de campaña
-    if (campaignFilter) {
-        whereClause = 'WHERE campaign = ?';
-        queryParams.push(campaignFilter);
-    }
-    
-    // Parámetros para la consulta principal (LIMIT y OFFSET van al final)
-    const storeQueryParams = [...queryParams, limit, offset];
+        // Lógica para añadir el filtro de campaña
+        if (campaignFilter) {
+            whereClause = 'WHERE campaign = ?';
+            queryParams.push(campaignFilter);
+        }
+        
+        // Parámetros para la consulta principal (LIMIT y OFFSET van al final)
+        const storeQueryParams = [...queryParams, limit, offset];
 
-    // Consulta SQL LIMPIA (sin saltos de línea ni sangría excesiva dentro de las comillas)
-    const storesQuery = `
-      SELECT id, name, campaign, is_active, created_at, updated_at
-      FROM stores ${whereClause}
-      ORDER BY name ASC
-      LIMIT ? OFFSET ?
-    `;
-    // Consulta de conteo SQL LIMPIA
-    const countQuery = `SELECT COUNT(id) AS count FROM stores ${whereClause}`;
-    
-    // El countQuery solo usa los parámetros de filtro
-    const [storesResult, countResult] = await Promise.all([
-      query(storesQuery, storeQueryParams),
-      query(countQuery, queryParams),
-    ]);
+        // Consulta SQL LIMPIA - CORREGIDO CON .trim()
+        const storesQuery = `
+            SELECT id, name, campaign, is_active, created_at, updated_at
+            FROM stores ${whereClause}
+            ORDER BY name ASC
+            LIMIT ? OFFSET ?
+        `.trim(); // <<-- CORRECCIÓN APLICADA
+        
+        // Consulta de conteo SQL LIMPIA - CORREGIDO CON .trim()
+        const countQuery = `SELECT COUNT(id) AS count FROM stores ${whereClause}`.trim(); // <<-- CORRECCIÓN APLICADA
+        
+        // El countQuery solo usa los parámetros de filtro
+        const [storesResult, countResult] = await Promise.all([
+            query(storesQuery, storeQueryParams),
+            query(countQuery, queryParams),
+        ]);
 
-    const stores = storesResult[0];
-    const totalItems = (countResult[0] as { count: number }[])[0].count;
-    const totalPages = Math.ceil(totalItems / limit);
+        // Aseguramos que el resultado de la consulta SELECT sea RowDataPacket[]
+        const stores = storesResult[0]; 
 
-    sendResponse(res, {
-      success: true,
-      message: 'Tiendas obtenidas exitosamente.',
-      data: { stores, pagination: { totalItems, currentPage: page, limit, totalPages } },
-    });
-  } catch (error: any) {
-    logError('GET /stores', error, { query: req.query });
-    sendResponse(res, {
-      success: false,
-      message: 'Error interno del servidor al obtener tiendas.',
-      error: { code: 'STORES_FETCH_ERROR', details: error.message },
-    }, 500);
-  }
+        // Accedemos al conteo. Asumimos que el primer elemento del array de resultados
+        // es el array de filas, y la primera fila es { count: number }.
+        const totalItems = (countResult[0] as { count: number }[])[0].count; 
+        const totalPages = Math.ceil(totalItems / limit);
+
+        sendResponse(res, {
+            success: true,
+            message: 'Tiendas obtenidas exitosamente.',
+            data: { stores, pagination: { totalItems, currentPage: page, limit, totalPages } },
+        });
+    } catch (error: any) {
+        logError('GET /stores', error, { query: req.query });
+        sendResponse(res, {
+            success: false,
+            message: 'Error interno del servidor al obtener tiendas.',
+            error: { code: 'STORES_FETCH_ERROR', details: error.message },
+        }, 500);
+    }
 });
 adminRouter.put('/prizes/:id', async (req: Request, res: Response) => {
     const prizeId = req.params.id;
