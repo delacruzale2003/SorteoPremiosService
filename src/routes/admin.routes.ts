@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 const adminRouter = Router();
 
 // ============================================================
-// Helpers (Manteniendo tu estructura de respuesta)
+// Helpers
 // ============================================================
 
 interface ApiResponse<T = any> {
@@ -36,9 +36,9 @@ const logError = (endpoint: string, error: any, extra: any = {}) => {
 // ============================================================
 
 /**
- * Crear tienda
- * POST /api/v1/admin/stores
- */
+ * Crear tienda
+ * POST /api/v1/admin/stores
+ */
 adminRouter.post('/stores', async (req: Request, res: Response) => {
   const { name, campaign } = req.body;
 
@@ -73,9 +73,9 @@ adminRouter.post('/stores', async (req: Request, res: Response) => {
 });
 
 /**
- * Crear premio
- * POST /api/v1/admin/prizes
- */
+ * Crear premio
+ * POST /api/v1/admin/prizes
+ */
 adminRouter.post('/prizes', async (req: Request, res: Response) => {
   const { storeId, name, description, initialStock } = req.body;
   const stock = parseInt(initialStock);
@@ -129,29 +129,32 @@ adminRouter.get('/stores', async (req: Request, res: Response) => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
-    const campaignFilter = req.query.campaign as string | undefined;
+    // Extraemos el filtro de la URL
+    const campaignFilter = req.query.campaign as string | undefined;
 
-    let whereClause = '';
-    const queryParams: (string | number)[] = [];
+    let whereClause = '';
+    const queryParams: (string | number)[] = [];
 
-    if (campaignFilter) {
-        whereClause = 'WHERE campaign = ?';
-        queryParams.push(campaignFilter);
-    }
-    
-    // Parámetros para la consulta principal (LIMIT y OFFSET van al final)
-    const storeQueryParams = [...queryParams, limit, offset];
+    // Lógica para añadir el filtro de campaña
+    if (campaignFilter) {
+        whereClause = 'WHERE campaign = ?';
+        queryParams.push(campaignFilter);
+    }
+    
+    // Parámetros para la consulta principal (LIMIT y OFFSET van al final)
+    const storeQueryParams = [...queryParams, limit, offset];
 
+    // Consulta SQL LIMPIA (sin saltos de línea ni sangría excesiva dentro de las comillas)
     const storesQuery = `
       SELECT id, name, campaign, is_active, created_at, updated_at
-      FROM stores
-      ${whereClause}
+      FROM stores ${whereClause}
       ORDER BY name ASC
-      LIMIT ? OFFSET ?;
+      LIMIT ? OFFSET ?
     `;
-    const countQuery = `SELECT COUNT(id) AS count FROM stores ${whereClause};`;
+    // Consulta de conteo SQL LIMPIA
+    const countQuery = `SELECT COUNT(id) AS count FROM stores ${whereClause}`;
     
-    // El countQuery solo usa los parámetros de filtro (queryParams)
+    // El countQuery solo usa los parámetros de filtro
     const [storesResult, countResult] = await Promise.all([
       query(storesQuery, storeQueryParams),
       query(countQuery, queryParams),
@@ -181,15 +184,15 @@ adminRouter.get('/stores', async (req: Request, res: Response) => {
  * GET /api/v1/admin/registers/latest?campaign=[nombre]
  */
 adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
-    const campaignFilter = req.query.campaign as string | undefined;
-    let whereClause = '';
-    let queryParams: string[] = [];
+    const campaignFilter = req.query.campaign as string | undefined;
+    let whereClause = '';
+    let queryParams: string[] = [];
 
-    if (campaignFilter) {
-        whereClause = 'WHERE r.campaign = ?';
-        queryParams.push(campaignFilter);
-    }
-    
+    if (campaignFilter) {
+        whereClause = 'WHERE r.campaign = ?';
+        queryParams.push(campaignFilter);
+    }
+    
   try {
     const sql = `
       SELECT 
@@ -199,7 +202,7 @@ adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
       FROM registers r
       JOIN stores s ON r.store_id = s.id
       JOIN prizes p ON r.prize_id = p.id
-      ${whereClause}
+      ${whereClause}
       ORDER BY r.created_at DESC
       LIMIT 20;
     `;
