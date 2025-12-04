@@ -238,6 +238,57 @@ adminRouter.patch('/stores/:id/deactivate', async (req: Request, res: Response) 
         }, 500);
     }
 });
+
+adminRouter.get('/prizes/counts', async (req: Request, res: Response) => {
+    const campaignFilter = req.query.campaign as string | undefined;
+
+    let whereClause = '';
+    const queryParams: (string | number)[] = [];
+
+    // Solo contamos premios para tiendas activas en la campaña
+    if (campaignFilter) {
+        whereClause = 'WHERE s.campaign = ? AND s.is_active = TRUE';
+        queryParams.push(campaignFilter);
+    } else {
+        // Si no hay campaña, contamos solo para tiendas activas
+        whereClause = 'WHERE s.is_active = TRUE';
+    }
+
+    try {
+        const sql = `
+            SELECT 
+                p.store_id, 
+                SUM(p.available_stock) AS prize_count
+            FROM prizes p
+            JOIN stores s ON p.store_id = s.id
+            ${whereClause}
+            GROUP BY p.store_id;
+        `.trim();
+
+        // El resultado es un array de { store_id, prize_count }
+        const [rows] = await query(sql, queryParams);
+
+        // Convertir el resultado a un objeto mapa { storeId: count }
+        const countsMap = (rows as any[]).reduce((acc, row) => {
+            acc[row.store_id] = row.prize_count;
+            return acc;
+        }, {});
+
+        sendResponse(res, {
+            success: true,
+            message: 'Conteos de premios obtenidos exitosamente.',
+            data: { counts: countsMap },
+        });
+
+    } catch (error: any) {
+        logError('GET /prizes/counts', error);
+        sendResponse(res, {
+            success: false,
+            message: 'Error interno del servidor al obtener conteos de premios.',
+            error: { code: 'PRIZE_COUNTS_ERROR', details: error.message },
+        }, 500);
+    }
+});
 /**
  * Crear premio
  * POST /api/v1/admin/prizes
