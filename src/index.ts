@@ -20,12 +20,12 @@ const allowedOrigins = [
     "http://localhost:5174",
     
     // 2. Entorno de Producción (Dominio de Render para el Frontend, aunque apunta al dominio principal)
-    "https://ccpremiosdic.onrender.com", 
+    "ccpremiosdic.onrender.com", 
     
     // 3. Dominio Personalizado Final (El que usa el usuario)
-    "https://cocacolanavidadpromo.ptm.pe",
+    "cocacolanavidadpromo.ptm.pe",
     // 4. Si el certificado SSL aún es intermitente, permite HTTP temporalmente.
-    "http://cocacolanavidadpromo.ptm.pe" 
+    "cocacolanavidadpromo.ptm.pe" 
 ];
 
 
