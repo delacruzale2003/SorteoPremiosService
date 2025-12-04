@@ -25,7 +25,7 @@ const allowedOrigins = [
     // 3. Dominio Personalizado Final (El que usa el usuario)
     "cocacolanavidadpromo.ptm.pe",
     // 4. Si el certificado SSL aún es intermitente, permite HTTP temporalmente.
-    "cocacolanavidadpromo.ptm.pe" 
+    "admincocacolanavidad.ptm.pe" 
 ];
 
 

@@ -1,4 +1,4 @@
-import mysql, { Pool, ConnectionOptions, QueryOptions, Connection } from 'mysql2/promise';
+import mysql, { Pool, ConnectionOptions, QueryOptions, Connection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import dotenv from 'dotenv';
 
 dotenv.config();

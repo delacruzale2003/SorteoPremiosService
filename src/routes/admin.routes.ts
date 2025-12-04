@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import { randomUUID } from 'crypto';
-
+import { ResultSetHeader } from 'mysql2/promise';
 const adminRouter = Router();
 
 // ============================================================
@@ -40,84 +40,199 @@ const logError = (endpoint: string, error: any, extra: any = {}) => {
  * POST /api/v1/admin/stores
  */
 adminRouter.post('/stores', async (req: Request, res: Response) => {
-  const { name, campaign } = req.body;
+    const { name, campaign } = req.body;
 
-  if (!name || !campaign) {
-    return sendResponse(res, {
-      success: false,
-      message: 'Faltan datos requeridos: name y campaign.',
-    }, 400);
-  }
+    if (!name || !campaign) {
+        return sendResponse(res, {
+            success: false,
+            message: 'Faltan datos requeridos: name y campaign.',
+        }, 400);
+    }
 
-  const newId = randomUUID();
+    const newId = randomUUID();
 
-  try {
-    await query(
-      `INSERT INTO stores (id, name, campaign) VALUES (?, ?, ?);`,
-      [newId, name, campaign]
-    );
+    try {
+        // Se añade is_active = TRUE por defecto
+        await query(
+            `INSERT INTO stores (id, name, campaign, is_active) VALUES (?, ?, ?, TRUE);`,
+            [newId, name, campaign]
+        );
 
-    sendResponse(res, {
-      success: true,
-      message: 'Tienda creada exitosamente.',
-      data: { storeId: newId, name, campaign },
-    }, 201);
-  } catch (error: any) {
-    logError('POST /stores', error, { body: req.body });
-    sendResponse(res, {
-      success: false,
-      message: 'Error interno al crear la tienda.',
-      error: { code: 'STORE_CREATE_ERROR', details: error.message },
-    }, 500);
-  }
+        sendResponse(res, {
+            success: true,
+            message: 'Tienda creada exitosamente.',
+            data: { storeId: newId, name, campaign },
+        }, 201);
+    } catch (error: any) {
+        logError('POST /stores', error, { body: req.body });
+        sendResponse(res, {
+            success: false,
+            message: 'Error interno al crear la tienda.',
+            error: { code: 'STORE_CREATE_ERROR', details: error.message },
+        }, 500);
+    }
 });
 
+
+
+
+// ============================================================
+// ENDPOINT ACTUALIZADO CON TIPADO
+// ============================================================
+
+adminRouter.put('/stores/:id', async (req: Request, res: Response) => {
+    const storeId = req.params.id;
+    const { name, campaign } = req.body;
+
+    // --- 1. Validación de Campos Mínimos ---
+    if (!name && !campaign) {
+        return sendResponse(res, {
+            success: false,
+            message: 'Se requiere al menos un campo (name o campaign) para actualizar.',
+        }, 400);
+    }
+
+    try {
+        const updateFields: string[] = [];
+        const updateParams: (string | number)[] = [];
+
+        if (name) {
+            updateFields.push('name = ?');
+            updateParams.push(name);
+        }
+        if (campaign) {
+            updateFields.push('campaign = ?');
+            updateParams.push(campaign);
+        }
+
+        // Ya validamos updateFields.length > 0 arriba, pero no hace daño
+        if (updateFields.length === 0) {
+            return sendResponse(res, {
+                success: false,
+                message: 'No se proporcionaron campos válidos para actualizar.',
+            }, 400);
+        }
+
+        // --- 2. Construcción y Ejecución de la Consulta ---
+        const sql = `
+            UPDATE stores
+            SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?;
+        `;
+        const params = [...updateParams, storeId];
+        
+        // CORRECCIÓN CLAVE: Desestructuramos el array de resultados y forzamos el tipado.
+        // La función query devuelve Promise<[T[], any]>. resultsArray[0] es el ResultSetHeader.
+        const [resultsArray] = await query(sql, params); 
+        
+        // Forzamos el tipado del primer elemento del array a ResultSetHeader.
+        // Se usa 'as unknown as' para superar la restricción de solapamiento si T es 'unknown[]'
+        const resultHeader = resultsArray[0] as unknown as ResultSetHeader; 
+        
+        // --- 3. Verificación de Filas Afectadas ---
+        if (resultHeader.affectedRows === 0) {
+             return sendResponse(res, {
+                 success: false,
+                 message: 'Tienda no encontrada o no se realizaron cambios.',
+             }, 404);
+        }
+
+        sendResponse(res, {
+            success: true,
+            message: 'Tienda actualizada exitosamente.',
+            data: { storeId },
+        });
+    } catch (error: any) {
+        logError(`PUT /stores/${storeId}`, error, { body: req.body });
+        sendResponse(res, {
+            success: false,
+            message: 'Error interno al editar la tienda.',
+            error: { code: 'STORE_UPDATE_ERROR', details: error.message },
+        }, 500);
+    }
+});
+
+adminRouter.patch('/stores/:id/deactivate', async (req: Request, res: Response) => {
+    const storeId = req.params.id;
+
+    try {
+        const sql = `
+            UPDATE stores
+            SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND is_active = TRUE;
+        `;
+        
+        const [result] = await query(sql, [storeId]);
+        
+        if ((result as any).affectedRows === 0) {
+             return sendResponse(res, {
+                success: false,
+                message: 'Tienda no encontrada o ya estaba desactivada.',
+            }, 404);
+        }
+
+        sendResponse(res, {
+            success: true,
+            message: 'Tienda desactivada exitosamente.',
+            data: { storeId },
+        });
+    } catch (error: any) {
+        logError(`PATCH /stores/${storeId}/deactivate`, error);
+        sendResponse(res, {
+            success: false,
+            message: 'Error interno al desactivar la tienda.',
+            error: { code: 'STORE_DEACTIVATE_ERROR', details: error.message },
+        }, 500);
+    }
+});
 /**
  * Crear premio
  * POST /api/v1/admin/prizes
  */
 adminRouter.post('/prizes', async (req: Request, res: Response) => {
-  const { storeId, name, description, initialStock } = req.body;
-  const stock = parseInt(initialStock);
+    const { storeId, name, description, initialStock } = req.body;
+    const stock = parseInt(initialStock);
 
-  if (!storeId || !name || isNaN(stock) || stock < 0) {
-    return sendResponse(res, {
-      success: false,
-      message: 'Faltan datos requeridos o el stock es inválido.',
-    }, 400);
-  }
+    if (!storeId || !name || isNaN(stock) || stock < 0) {
+        return sendResponse(res, {
+            success: false,
+            message: 'Faltan datos requeridos o el stock es inválido.',
+        }, 400);
+    }
 
-  const newId = randomUUID();
+    const newId = randomUUID();
 
-  try {
-    const [storeRows] = await query(`SELECT id FROM stores WHERE id = ?;`, [storeId]);
+    try {
+        // 1. Verificar que la tienda existe y está activa
+        const [storeRows] = await query(`SELECT id FROM stores WHERE id = ? AND is_active = TRUE;`, [storeId]);
 
-    if ((storeRows as any[]).length === 0) {
-      return sendResponse(res, {
-        success: false,
-        message: 'La tienda con el ID proporcionado no existe.',
-      }, 404);
-    }
+        if ((storeRows as any[]).length === 0) {
+            return sendResponse(res, {
+                success: false,
+                message: 'La tienda con el ID proporcionado no existe o no está activa.',
+            }, 404);
+        }
 
-    await query(
-      `INSERT INTO prizes (id, store_id, name, description, initial_stock, available_stock)
-       VALUES (?, ?, ?, ?, ?, ?);`,
-      [newId, storeId, name, description, stock, stock]
-    );
+        // 2. Insertar el premio
+        await query(
+            `INSERT INTO prizes (id, store_id, name, description, initial_stock, available_stock)
+             VALUES (?, ?, ?, ?, ?, ?);`,
+            [newId, storeId, name, description, stock, stock]
+        );
 
-    sendResponse(res, {
-      success: true,
-      message: 'Premio creado y stock inicializado exitosamente.',
-      data: { prizeId: newId },
-    }, 201);
-  } catch (error: any) {
-    logError('POST /prizes', error, { body: req.body });
-    sendResponse(res, {
-      success: false,
-      message: 'Error interno al crear el premio.',
-      error: { code: 'PRIZE_CREATE_ERROR', details: error.message },
-    }, 500);
-  }
+        sendResponse(res, {
+            success: true,
+            message: 'Premio creado y stock inicializado exitosamente.',
+            data: { prizeId: newId },
+        }, 201);
+    } catch (error: any) {
+        logError('POST /prizes', error, { body: req.body });
+        sendResponse(res, {
+            success: false,
+            message: 'Error interno al crear el premio.',
+            error: { code: 'PRIZE_CREATE_ERROR', details: error.message },
+        }, 500);
+    }
 });
 
 /**
@@ -178,49 +293,122 @@ adminRouter.get('/stores', async (req: Request, res: Response) => {
     }, 500);
   }
 });
+adminRouter.put('/prizes/:id', async (req: Request, res: Response) => {
+    const prizeId = req.params.id;
+    const { name, description, availableStock } = req.body;
+    
+    // El stock es opcional, pero si se proporciona, debe ser un número válido
+    let stockAdjustment: number | undefined;
+    if (availableStock !== undefined) {
+        const parsedStock = parseInt(availableStock);
+        if (isNaN(parsedStock) || parsedStock < 0) {
+             return sendResponse(res, {
+                success: false,
+                message: 'El stock disponible proporcionado es inválido.',
+            }, 400);
+        }
+        stockAdjustment = parsedStock;
+    }
+
+    if (!name && !description && stockAdjustment === undefined) {
+        return sendResponse(res, {
+            success: false,
+            message: 'Se requiere al menos un campo (name, description o availableStock) para actualizar.',
+        }, 400);
+    }
+
+    try {
+        const updateFields: string[] = [];
+        const updateParams: (string | number)[] = [];
+
+        if (name) {
+            updateFields.push('name = ?');
+            updateParams.push(name);
+        }
+        if (description) {
+            updateFields.push('description = ?');
+            updateParams.push(description);
+        }
+        // Nota: Solo se ajusta el stock disponible, no el stock inicial (initial_stock)
+        if (stockAdjustment !== undefined) {
+            updateFields.push('available_stock = ?');
+            updateParams.push(stockAdjustment);
+        }
+
+        const sql = `
+            UPDATE prizes
+            SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?;
+        `;
+        const params = [...updateParams, prizeId];
+        
+        const [result] = await query(sql, params);
+        
+        if ((result as any).affectedRows === 0) {
+             return sendResponse(res, {
+                success: false,
+                message: 'Premio no encontrado o no se realizaron cambios.',
+            }, 404);
+        }
+
+        sendResponse(res, {
+            success: true,
+            message: 'Premio actualizado exitosamente.',
+            data: { prizeId },
+        });
+    } catch (error: any) {
+        logError(`PUT /prizes/${prizeId}`, error, { body: req.body });
+        sendResponse(res, {
+            success: false,
+            message: 'Error interno al editar el premio.',
+            error: { code: 'PRIZE_UPDATE_ERROR', details: error.message },
+        }, 500);
+    }
+});
 
 /**
  * Obtener últimos registros
  * GET /api/v1/admin/registers/latest?campaign=[nombre]
  */
 adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
-    const campaignFilter = req.query.campaign as string | undefined;
-    let whereClause = '';
-    let queryParams: string[] = [];
+    const campaignFilter = req.query.campaign as string | undefined;
+    let whereClause = '';
+    let queryParams: string[] = [];
 
-    if (campaignFilter) {
-        whereClause = 'WHERE r.campaign = ?';
-        queryParams.push(campaignFilter);
-    }
-    
-  try {
-    const sql = `
-      SELECT 
-        r.id, r.name, r.campaign, r.created_at, r.status,
-        s.name AS store_name, 
-        p.name AS prize_name
-      FROM registers r
-      JOIN stores s ON r.store_id = s.id
-      JOIN prizes p ON r.prize_id = p.id
-      ${whereClause}
-      ORDER BY r.created_at DESC
-      LIMIT 20;
-    `;
-    const [rows] = await query(sql, queryParams);
+    if (campaignFilter) {
+        whereClause = 'WHERE r.campaign = ?';
+        queryParams.push(campaignFilter);
+    }
+    
+    try {
+        const sql = `
+            SELECT 
+                r.id, r.name, r.campaign, r.created_at, r.status,
+                s.name AS store_name, 
+                p.name AS prize_name
+            FROM registers r
+            JOIN stores s ON r.store_id = s.id
+            JOIN prizes p ON r.prize_id = p.id
+            ${whereClause}
+            ORDER BY r.created_at DESC
+            LIMIT 20;
+        `;
+        const [rows] = await query(sql, queryParams);
 
-    sendResponse(res, {
-      success: true,
-      message: 'Últimos registros obtenidos exitosamente.',
-      data: rows,
-    });
-  } catch (error: any) {
-    logError('GET /registers/latest', error);
-    sendResponse(res, {
-      success: false,
-      message: 'Error interno del servidor al obtener registros.',
-      error: { code: 'REGISTERS_FETCH_ERROR', details: error.message },
-    }, 500);
-  }
+        sendResponse(res, {
+            success: true,
+            message: 'Últimos registros obtenidos exitosamente.',
+            data: rows,
+        });
+    } catch (error: any) {
+        logError('GET /registers/latest', error);
+        sendResponse(res, {
+            success: false,
+            message: 'Error interno del servidor al obtener registros.',
+            error: { code: 'REGISTERS_FETCH_ERROR', details: error.message },
+        }, 500);
+    }
 });
+
 
 export default adminRouter;
