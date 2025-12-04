@@ -1,203 +1,199 @@
-import { Router } from 'express';
-import { query } from '../db'; 
+import { Router, Request, Response } from 'express';
+import { query } from '../db';
 import { randomUUID } from 'crypto';
 
 const adminRouter = Router();
 
-// ====================================================================
-// CRUD DE TIENDAS Y PREMIOS
-// ====================================================================
+// ============================================================
+// Helpers
+// ============================================================
+
+interface ApiResponse<T = any> {
+  success: boolean;
+  message: string;
+  data?: T;
+  error?: { code: string; details: string };
+}
+
+const sendResponse = <T>(
+  res: Response,
+  payload: ApiResponse<T>,
+  status: number = 200
+) => {
+  res.status(status).json(payload);
+};
+
+const logError = (endpoint: string, error: any, extra: any = {}) => {
+  console.error(`[${new Date().toISOString()}] ERROR in ${endpoint}`, {
+    message: error.message,
+    stack: error.stack,
+    extra,
+  });
+};
+
+// ============================================================
+// RUTAS DE ADMINISTRACIÓN
+// ============================================================
 
 /**
- * Endpoint para CREAR una nueva tienda (Store).
- * URL: POST /api/v1/admin/stores
+ * Crear tienda
+ * POST /api/v1/admin/stores
  */
-adminRouter.post('/stores', async (req, res) => {
-    const { name, campaign } = req.body;
-    
-    if (!name || !campaign) {
-        return res.status(400).json({ message: 'Faltan datos requeridos: name y campaign.' });
-    }
+adminRouter.post('/stores', async (req: Request, res: Response) => {
+  const { name, campaign } = req.body;
 
-    const newId = randomUUID();
-    
-    try {
-        await query(`
-            INSERT INTO stores (id, name, campaign)
-            VALUES (?, ?, ?);
-        `, [newId, name, campaign]);
+  if (!name || !campaign) {
+    return sendResponse(res, {
+      success: false,
+      message: 'Faltan datos requeridos: name y campaign.',
+    }, 400);
+  }
 
-        res.status(201).json({ 
-            message: 'Tienda creada exitosamente.', 
-            storeId: newId,
-            name,
-            campaign 
-        });
-    } catch (error) {
-        console.error('Error al crear tienda:', error);
-        res.status(500).json({ message: 'Error interno al crear la tienda.' });
-    }
+  const newId = randomUUID();
+
+  try {
+    await query(
+      `INSERT INTO stores (id, name, campaign) VALUES (?, ?, ?);`,
+      [newId, name, campaign]
+    );
+
+    sendResponse(res, {
+      success: true,
+      message: 'Tienda creada exitosamente.',
+      data: { storeId: newId, name, campaign },
+    }, 201);
+  } catch (error: any) {
+    logError('POST /stores', error, { body: req.body });
+    sendResponse(res, {
+      success: false,
+      message: 'Error interno al crear la tienda.',
+      error: { code: 'STORE_CREATE_ERROR', details: error.message },
+    }, 500);
+  }
 });
 
 /**
- * Endpoint para ELIMINAR una tienda y sus premios.
- * URL: DELETE /api/v1/admin/stores/:id
+ * Crear premio
+ * POST /api/v1/admin/prizes
  */
-adminRouter.delete('/stores/:id', async (req, res) => {
-    const { id } = req.params;
+adminRouter.post('/prizes', async (req: Request, res: Response) => {
+  const { storeId, name, description, initialStock } = req.body;
+  const stock = parseInt(initialStock);
 
-    try {
-        // La restricción ON DELETE CASCADE en la tabla prizes asegura 
-        // que los premios asociados a esta store se eliminen automáticamente.
-        const [result] = await query(`
-            DELETE FROM stores WHERE id = ?;
-        `, [id]);
+  if (!storeId || !name || isNaN(stock) || stock < 0) {
+    return sendResponse(res, {
+      success: false,
+      message: 'Faltan datos requeridos o el stock es inválido.',
+    }, 400);
+  }
 
-        // En MySQL, el campo affectedRows indica cuántas filas fueron afectadas
-        if ((result as any).affectedRows === 0) {
-            return res.status(404).json({ message: 'Tienda no encontrada.' });
-        }
+  const newId = randomUUID();
 
-        res.status(200).json({ message: 'Tienda eliminada exitosamente.' });
-    } catch (error) {
-        console.error('Error al eliminar tienda:', error);
-        res.status(500).json({ message: 'Error interno al eliminar la tienda.' });
+  try {
+    const [storeRows] = await query(`SELECT id FROM stores WHERE id = ?;`, [storeId]);
+
+    if ((storeRows as any[]).length === 0) {
+      return sendResponse(res, {
+        success: false,
+        message: 'La tienda con el ID proporcionado no existe.',
+      }, 404);
     }
-});
 
+    await query(
+      `INSERT INTO prizes (id, store_id, name, description, initial_stock, available_stock)
+       VALUES (?, ?, ?, ?, ?, ?);`,
+      [newId, storeId, name, description, stock, stock]
+    );
 
-/**
- * Endpoint para OBTENER los premios de una tienda específica.
- * URL: GET /api/v1/admin/stores/:storeId/prizes
- * CRÍTICO para EditStoreModal.tsx
- */
-adminRouter.get('/stores/:storeId/prizes', async (req, res) => {
-    const { storeId } = req.params;
-    
-    try {
-        // Seleccionamos los campos necesarios para la edición de stock.
-        const [prizesResult] = await query(`
-            SELECT id, name, initial_stock, available_stock
-            FROM prizes
-            WHERE store_id = ?;
-        `, [storeId]);
-
-        // Retornamos el array de premios. Si está vacío, es un array vacío.
-        res.status(200).json({ 
-            data: prizesResult,
-            storeId: storeId
-        });
-    } catch (error) {
-        console.error('Error al obtener premios por tienda:', error);
-        res.status(500).json({ message: 'Error interno al obtener la lista de premios.' });
-    }
-});
-
-
-/**
- * Endpoint para CREAR un nuevo premio asociado a una tienda (Prize).
- * URL: POST /api/v1/admin/prizes
- */
-adminRouter.post('/prizes', async (req, res) => {
-    const { storeId, name, description, initialStock } = req.body;
-    
-    const stock = parseInt(initialStock);
-    
-    if (!storeId || !name || stock === undefined || isNaN(stock) || stock < 0) {
-        return res.status(400).json({ message: 'Faltan datos requeridos o el stock es inválido.' });
-    }
-
-    const newId = randomUUID();
-    
-    try {
-        // Validación: Verificar que la tienda exista
-        const [storeRows] = await query(`SELECT id FROM stores WHERE id = ?;`, [storeId]);
-        
-        if ((storeRows as any[]).length === 0) {
-            return res.status(404).json({ message: 'La tienda con el ID proporcionado no existe.' });
-        }
-
-        await query(`
-            INSERT INTO prizes (id, store_id, name, description, initial_stock, available_stock)
-            VALUES (?, ?, ?, ?, ?, ?);
-        `, [newId, storeId, name, description, stock, stock]);
-
-        res.status(201).json({ 
-            message: 'Premio creado y stock inicializado exitosamente.', 
-            prizeId: newId
-        });
-    } catch (error) {
-        console.error('Error al crear premio:', error);
-        res.status(500).json({ message: 'Error interno al crear el premio.' });
-    }
-});
-
-
-/**
- * Endpoint para obtener tiendas con paginación (Admin).
- * URL: GET /api/v1/admin/stores?page=1&limit=10
- */
-adminRouter.get('/stores', async (req, res) => {
-    try {
-        const page = parseInt(req.query.page as string) || 1;
-        const limit = parseInt(req.query.limit as string) || 10;
-        const offset = (page - 1) * limit;
-
-        // NOTA: Si el frontend necesita available_prizes_count aquí, 
-        // la consulta debería usar un LEFT JOIN y SUM, lo cual es complejo.
-        // Por ahora, solo devolvemos los datos de la tabla stores.
-        const storesQuery = `
-            SELECT id, name, campaign, is_active, created_at, updated_at
-            FROM stores
-            ORDER BY name ASC
-            LIMIT ? OFFSET ?;
-        `;
-        const countQuery = `SELECT COUNT(id) AS count FROM stores;`;
-
-        const [storesResult, countResult] = await Promise.all([
-            query(storesQuery, [limit, offset]),
-            query(countQuery)
-        ]);
-
-        const stores = storesResult[0]; 
-        const totalItems = (countResult[0] as { count: number }[])[0].count; 
-        const totalPages = Math.ceil(totalItems / limit);
-
-        res.status(200).json({
-            data: stores,
-            pagination: { totalItems, currentPage: page, limit, totalPages }
-        });
-
-    } catch (error) {
-        console.error('Error al obtener tiendas:', error);
-        res.status(500).json({ message: 'Error interno del servidor al obtener tiendas.' });
-    }
+    sendResponse(res, {
+      success: true,
+      message: 'Premio creado y stock inicializado exitosamente.',
+      data: { prizeId: newId },
+    }, 201);
+  } catch (error: any) {
+    logError('POST /prizes', error, { body: req.body });
+    sendResponse(res, {
+      success: false,
+      message: 'Error interno al crear el premio.',
+      error: { code: 'PRIZE_CREATE_ERROR', details: error.message },
+    }, 500);
+  }
 });
 
 /**
- * Endpoint para obtener los últimos 20 registros (Admin).
- * URL: GET /api/v1/admin/registers/latest
+ * Obtener tiendas con paginación
+ * GET /api/v1/admin/stores?page=1&limit=10
  */
-adminRouter.get('/registers/latest', async (req, res) => {
-    try {
-        const sql = `
-            SELECT 
-                r.id, r.name, r.campaign, r.created_at, r.status,
-                s.name AS store_name, 
-                p.name AS prize_name
-            FROM registers r
-            JOIN stores s ON r.store_id = s.id
-            JOIN prizes p ON r.prize_id = p.id
-            ORDER BY r.created_at DESC
-            LIMIT 20;
-        `;
-        const [rows] = await query(sql);
+adminRouter.get('/stores', async (req: Request, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
 
-        res.status(200).json({ data: rows });
-    } catch (error) {
-        console.error('Error al obtener registros:', error);
-        res.status(500).json({ message: 'Error interno del servidor al obtener registros.' });
-    }
+    const storesQuery = `
+      SELECT id, name, campaign, is_active, created_at, updated_at
+      FROM stores
+      ORDER BY name ASC
+      LIMIT ? OFFSET ?;
+    `;
+    const countQuery = `SELECT COUNT(id) AS count FROM stores;`;
+
+    const [storesResult, countResult] = await Promise.all([
+      query(storesQuery, [limit, offset]),
+      query(countQuery),
+    ]);
+
+    const stores = storesResult[0];
+    const totalItems = (countResult[0] as { count: number }[])[0].count;
+    const totalPages = Math.ceil(totalItems / limit);
+
+    sendResponse(res, {
+      success: true,
+      message: 'Tiendas obtenidas exitosamente.',
+      data: { stores, pagination: { totalItems, currentPage: page, limit, totalPages } },
+    });
+  } catch (error: any) {
+    logError('GET /stores', error, { query: req.query });
+    sendResponse(res, {
+      success: false,
+      message: 'Error interno del servidor al obtener tiendas.',
+      error: { code: 'STORES_FETCH_ERROR', details: error.message },
+    }, 500);
+  }
+});
+
+/**
+ * Obtener últimos registros
+ * GET /api/v1/admin/registers/latest
+ */
+adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
+  try {
+    const sql = `
+      SELECT 
+        r.id, r.name, r.campaign, r.created_at, r.status,
+        s.name AS store_name, 
+        p.name AS prize_name
+      FROM registers r
+      JOIN stores s ON r.store_id = s.id
+      JOIN prizes p ON r.prize_id = p.id
+      ORDER BY r.created_at DESC
+      LIMIT 20;
+    `;
+    const [rows] = await query(sql);
+
+    sendResponse(res, {
+      success: true,
+      message: 'Últimos registros obtenidos exitosamente.',
+      data: rows,
+    });
+  } catch (error: any) {
+    logError('GET /registers/latest', error);
+    sendResponse(res, {
+      success: false,
+      message: 'Error interno del servidor al obtener registros.',
+      error: { code: 'REGISTERS_FETCH_ERROR', details: error.message },
+    }, 500);
+  }
 });
 
 export default adminRouter;
