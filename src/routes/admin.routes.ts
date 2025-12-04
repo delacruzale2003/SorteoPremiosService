@@ -82,10 +82,14 @@ adminRouter.get('/stores', async (req: Request, res: Response) => {
         let whereClause = '';
         const queryParams: (string | number)[] = [];
 
-        // Lógica para añadir el filtro de campaña
+        // Lógica para añadir el filtro de campaña Y el estado activo
         if (campaignFilter) {
-            whereClause = 'WHERE campaign = ?';
+            // Si hay filtro de campaña, añadimos ambas condiciones con AND
+            whereClause = 'WHERE campaign = ? AND is_active = TRUE';
             queryParams.push(campaignFilter);
+        } else {
+            // Si NO hay filtro de campaña, solo añadimos la condición de activo
+            whereClause = 'WHERE is_active = TRUE';
         }
         
         // Parámetros para la consulta principal (LIMIT y OFFSET van al final)
@@ -97,10 +101,10 @@ adminRouter.get('/stores', async (req: Request, res: Response) => {
             FROM stores ${whereClause}
             ORDER BY name ASC
             LIMIT ? OFFSET ?
-        `.trim(); // <<-- CORRECCIÓN APLICADA
+        `.trim();
         
         // Consulta de conteo SQL LIMPIA - CORREGIDO CON .trim()
-        const countQuery = `SELECT COUNT(id) AS count FROM stores ${whereClause}`.trim(); // <<-- CORRECCIÓN APLICADA
+        const countQuery = `SELECT COUNT(id) AS count FROM stores ${whereClause}`.trim();
         
         // El countQuery solo usa los parámetros de filtro
         const [storesResult, countResult] = await Promise.all([
@@ -111,8 +115,7 @@ adminRouter.get('/stores', async (req: Request, res: Response) => {
         // Aseguramos que el resultado de la consulta SELECT sea RowDataPacket[]
         const stores = storesResult[0]; 
 
-        // Accedemos al conteo. Asumimos que el primer elemento del array de resultados
-        // es el array de filas, y la primera fila es { count: number }.
+        // Accedemos al conteo.
         const totalItems = (countResult[0] as { count: number }[])[0].count; 
         const totalPages = Math.ceil(totalItems / limit);
 
