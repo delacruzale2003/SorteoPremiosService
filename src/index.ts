@@ -15,22 +15,30 @@ app.use(express.json());
 
 // Habilitar CORS
 const allowedOrigins = [
-    // 1. Entorno de Desarrollo (Vite por defecto)
+    // 1. Entorno de Desarrollo (HTTP)
     "http://localhost:5173", 
     "http://localhost:5174",
     
-    // 2. Entorno de Producción (Dominio de Render para el Frontend, aunque apunta al dominio principal)
-    "ccpremiosdic.onrender.com", 
+    // 2. Entorno de Producción (Render)
+    "https://ccpremiosdic.onrender.com", // Asegúrate de que Render usa HTTPS
     
-    // 3. Dominio Personalizado Final (El que usa el usuario)
-    "cocacolanavidadpromo.ptm.pe",
-    // 4. Si el certificado SSL aún es intermitente, permite HTTP temporalmente.
-    "admincocacolanavidad.ptm.pe" 
+    // 3. Dominio Personalizado Final (AÑADIR HTTPS)
+    "https://cocacolanavidadpromo.ptm.pe", // <--- ¡CORRECCIÓN CLAVE AQUÍ!
+    "https://admincocacolanavidad.ptm.pe", // También corrige el de admin por si acaso
+    
+    // Para mayor seguridad durante la migración o si no estás seguro:
+    "http://cocacolanavidadpromo.ptm.pe", 
 ];
 
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'), false);
+        }
+    },
   methods: ["GET", "POST","PUT", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
