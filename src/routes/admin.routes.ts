@@ -494,7 +494,7 @@ adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
     try {
         const sql = `
             SELECT 
-                r.id, r.name, r.campaign, r.created_at, r.status, r.phone_number,
+                r.id, r.name, r.campaign, r.created_at, r.status, r.phone_number, dni,
                 s.name AS store_name, 
                 p.name AS prize_name
             FROM registers r
