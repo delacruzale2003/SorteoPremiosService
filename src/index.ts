@@ -31,7 +31,7 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: allowedOrigins,
-  methods: ["GET", "POST"],
+  methods: ["GET", "POST","PUT", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 

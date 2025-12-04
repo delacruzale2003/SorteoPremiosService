@@ -31,14 +31,10 @@ const logError = (endpoint: string, error: any, extra: any = {}) => {
   });
 };
 
-// ============================================================
-// RUTAS DE ADMINISTRACIÓN
-// ============================================================
 
-/**
- * Crear tienda
- * POST /api/v1/admin/stores
- */
+
+
+
 adminRouter.post('/stores', async (req: Request, res: Response) => {
     const { name, campaign } = req.body;
 
@@ -72,10 +68,6 @@ adminRouter.post('/stores', async (req: Request, res: Response) => {
         }, 500);
     }
 });
-
-
-
-
 // ============================================================
 // ENDPOINT ACTUALIZADO CON TIPADO
 // ============================================================
