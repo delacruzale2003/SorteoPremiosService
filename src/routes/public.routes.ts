@@ -68,39 +68,30 @@ publicRouter.post('/claim', async (req, res) => {
     try {
         // === VERIFICACIÓN DE LÍMITE POR PERSONA ===
         
-        // 1. Definir el identificador más robusto para la verificación de límite: DNI > Teléfono > Nombre
-        let limitIdentifier: string | null = null;
-        
-        if (finalDni) {
-            limitIdentifier = finalDni;
-        } else if (finalPhoneNumber) {
-            limitIdentifier = finalPhoneNumber;
-        } else {
-            limitIdentifier = name;
-        }
-
-        // 2. Ejecutar la consulta de verificación de límite
-        // La consulta revisa si ya existe un registro usando el DNI, o el Teléfono (si no hay DNI), o el Nombre (si no hay ninguno).
+        // Ejecutar la consulta de verificación de límite
+        // Buscamos cualquier registro existente en la campaña que coincida con CUALQUIERA
+        // de los identificadores proporcionados (DNI, Teléfono, Nombre).
         const [countRows] = await query(`
             SELECT COUNT(id) AS prize_count FROM registers 
-            WHERE 
-                -- PRIORIDAD 1: Coincide el DNI (si DNI no es NULL)
-                (dni = ? AND dni IS NOT NULL) OR 
+            WHERE campaign = ? AND (
+                -- Coincidencia por DNI (si se proporcionó un DNI)
+                (dni IS NOT NULL AND dni = ?) OR 
                 
-                -- PRIORIDAD 2: Coincide el Teléfono Y el DNI es NULL
-                (phone_number = ? AND phone_number IS NOT NULL AND dni IS NULL) OR
+                -- Coincidencia por Teléfono (si se proporcionó un Teléfono)
+                (phone_number IS NOT NULL AND phone_number = ?) OR
                 
-                -- PRIORIDAD 3: Coincide el Nombre Y Teléfono/DNI son NULL
-                (name = ? AND phone_number IS NULL AND dni IS NULL)
-                
-                AND campaign = ?;
-        `, [limitIdentifier, limitIdentifier, limitIdentifier, campaign]);
+                -- Coincidencia por Nombre (solo si DNI y Teléfono NO están presentes en el registro)
+                (name = ? AND dni IS NULL AND phone_number IS NULL)
+            );
+        `, [campaign, finalDni, finalPhoneNumber, name]); // Pasamos los tres identificadores
+
         
         const countResult = (countRows as { prize_count: number }[])[0].prize_count;
         
         if (countResult >= MAX_PRIZES_PER_PERSON) {
+            // No se devuelve el identificador al usuario por seguridad/privacidad
             return res.status(403).json({ 
-                message: `Límite alcanzado. Ya has reclamado ${MAX_PRIZES_PER_PERSON} premio(s) con este identificador en esta campaña.` 
+                message: `Límite alcanzado. Ya has reclamado ${MAX_PRIZES_PER_PERSON} premio(s) en esta campaña.` 
             });
         }
         // =======================================================
@@ -116,6 +107,7 @@ publicRouter.post('/claim', async (req, res) => {
         const availablePrizes = availablePrizesRows as PrizeForDraw[];
 
         if (availablePrizes.length === 0) {
+            // 💡 NOTA: Podrías intentar asignar un premio "No ganó" si tu lógica lo permite.
             return res.status(409).json({ message: 'Lo sentimos, los premios para esta tienda se han agotado.' });
         }
 
@@ -137,6 +129,7 @@ publicRouter.post('/claim', async (req, res) => {
             `, [assignedPrizeId]);
             
             if ((prizeCheckRows as any[]).length === 0) {
+                // Si otro hilo tomó el último stock después del sorteo.
                 throw new Error('STOCK_LOST'); 
             }
 
@@ -148,7 +141,7 @@ publicRouter.post('/claim', async (req, res) => {
                 WHERE id = ?;
             `, [assignedPrizeId]);
 
-            // 3. Registrar la entrega (AÑADIMOS DNI)
+            // 3. Registrar la entrega (USANDO LOS NOMBRES DE COLUMNAS CORRECTOS)
             await connection.execute(`
                 INSERT INTO registers (id, name, store_id, prize_id, campaign, status, photo_url, phone_number, dni)
                 VALUES (?, ?, ?, ?, ?, 'CLAIMED', ?, ?, ?);
