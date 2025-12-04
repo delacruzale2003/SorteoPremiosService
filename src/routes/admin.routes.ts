@@ -455,18 +455,46 @@ adminRouter.get('/prizes/store/:storeId', async (req: Request, res: Response) =>
  */
 adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
     const campaignFilter = req.query.campaign as string | undefined;
-    let whereClause = '';
-    let queryParams: string[] = [];
+    const storeIdFilter = req.query.storeId as string | undefined;
+    
+    // 💡 DETERMINAR LÍMITE: Si se pasa un valor grande (ej. 99999) o '0' para descarga, se ignora el LIMIT.
+    const requestedLimit = parseInt(req.query.limit as string) || 20;
+    const isDownload = requestedLimit > 1000 || requestedLimit === 0; // Se considera descarga si el límite es muy alto o cero
+    
+    let whereConditions: string[] = [];
+    let queryParams: (string | number)[] = [];
 
+    // Condición 1: Filtrar por Campaña (obligatoria)
     if (campaignFilter) {
-        whereClause = 'WHERE r.campaign = ?';
+        whereConditions.push('r.campaign = ?');
         queryParams.push(campaignFilter);
+    } 
+    
+    // Condición 2: Filtrar por Tienda Seleccionada (opcional)
+    if (storeIdFilter) {
+        whereConditions.push('r.store_id = ?');
+        queryParams.push(storeIdFilter);
+    }
+
+    // Condición 3: Mostrar solo registros de tiendas ACTIVAS (s.is_active)
+    whereConditions.push('s.is_active = TRUE');
+
+    let whereClause = '';
+    if (whereConditions.length > 0) {
+        whereClause = 'WHERE ' + whereConditions.join(' AND ');
     }
     
+    // Cláusula LIMIT/OFFSET condicional
+    let limitClause = '';
+    if (!isDownload) {
+        // En modo normal de visualización, limitamos a 20 (o el requestedLimit)
+        limitClause = `LIMIT ${requestedLimit}`;
+    }
+
     try {
         const sql = `
             SELECT 
-                r.id, r.name, r.campaign, r.created_at, r.status,
+                r.id, r.name, r.campaign, r.created_at, r.status, r.phone,
                 s.name AS store_name, 
                 p.name AS prize_name
             FROM registers r
@@ -474,13 +502,15 @@ adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
             JOIN prizes p ON r.prize_id = p.id
             ${whereClause}
             ORDER BY r.created_at DESC
-            LIMIT 20;
-        `;
+            ${limitClause};
+        `.trim();
+        
         const [rows] = await query(sql, queryParams);
 
         sendResponse(res, {
             success: true,
-            message: 'Últimos registros obtenidos exitosamente.',
+            message: 'Registros obtenidos exitosamente.',
+            // Devolvemos el array de filas completo, sin paginación extra
             data: rows,
         });
     } catch (error: any) {
