@@ -1,20 +1,31 @@
-import mysql, { Pool, ConnectionOptions, QueryOptions, Connection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import mysql, { Pool, ConnectionOptions, Connection } from 'mysql2/promise';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// --- CONFIGURACIÓN DE CONEXIÓN MYSQL ---
+// Define un límite por defecto más robusto para entornos de alta concurrencia
+const DEFAULT_CONNECTION_LIMIT = 30; 
+
+// --- CONFIGURACIÓN DE CONEXIÓN MYSQL OPTIMIZADA ---
 const dbConfig: ConnectionOptions = {
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     port: parseInt(process.env.DB_PORT || '3306', 10),
+    
+    // 💡 AUMENTADO y CONFIGURABLE: 30 es un valor seguro para 20 tiendas con alta concurrencia.
+    connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || String(DEFAULT_CONNECTION_LIMIT), 10),
+    
     waitForConnections: true,
-    connectionLimit: 10,
     queueLimit: 0,
-    // Configuramos MySQL para trabajar con fechas UTC
     timezone: 'Z', 
+
+    // === SOLUCIÓN CRÍTICA ANTI-ECONNRESET ===
+    // Habilita el envío de paquetes para mantener viva la conexión TCP
+    enableKeepAlive: true,
+    // Comienza a enviar paquetes de mantenimiento después de 5 segundos de inactividad
+    keepAliveInitialDelay: 5000, 
 };
 
 // Crear el Pool de Conexiones
@@ -35,10 +46,8 @@ try {
  */
 export const query = async <T>(sql: string, params?: any[]): Promise<[T[], any]> => {
     try {
-        // pool.execute es la forma recomendada de ejecutar consultas con parámetros en mysql2
         return await pool.execute(sql, params) as [T[], any];
     } catch (error) {
-        // Re-lanzar el error para que sea capturado por el código que llama.
         console.error('Error al ejecutar consulta SQL:', sql, params, error);
         throw error;
     }
@@ -49,7 +58,6 @@ export const query = async <T>(sql: string, params?: any[]): Promise<[T[], any]>
  */
 export async function testDbConnection() {
     try {
-        // Una consulta simple para confirmar que la conexión es exitosa
         await pool.query('SELECT 1 + 1 AS solution;');
         console.log('✅ Conexión a MySQL establecida correctamente.');
     } catch (error) {
