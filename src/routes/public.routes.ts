@@ -166,5 +166,62 @@ publicRouter.post('/claim', async (req, res) => {
         res.status(500).json({ message: 'Error interno del servidor durante el proceso de reclamo.' });
     }
 });
+publicRouter.post('/only-register', async (req, res) => {
+    // 💡 NUEVOS CAMPOS RECIBIDOS
+    const { name, campaign, photoUrl, phoneNumber, dni, voucherNumber } = req.body; 
+
+    // Validación: name, campaign, phone, dni (requeridos por el frontend)
+    if (!name || !campaign || !phoneNumber || !dni) {
+        return res.status(400).json({ message: 'Faltan datos requeridos (name, campaign, phoneNumber, dni).' });
+    }
+
+    let newRegisterId: string = randomUUID();
+
+    // Normalizar a NULL los campos opcionales/no requeridos en el registro
+    const finalPhotoUrl = photoUrl || null;
+    const finalVoucherNumber = voucherNumber || null;
+    // 💡 CORRECCIÓN APLICADA: Normalizar campos phone/dni para que existan en el scope
+    const finalPhoneNumber = phoneNumber || null;
+    const finalDni = dni || null;
+
+    try {
+        // No hay límite de premios ni stock que verificar, solo limitamos el registro por DNI/Phone
+        
+        // Ejecutar el registro
+        await query(`
+            INSERT INTO registers (
+                id, 
+                name, 
+                campaign, 
+                status, 
+                phone_number, 
+                dni, 
+                photo_url, 
+                voucher_number, 
+                store_id, 
+                prize_id
+            )
+            VALUES (?, ?, ?, 'REGISTERED', ?, ?, ?, ?, NULL, NULL);
+        `, [
+            newRegisterId, 
+            name, 
+            campaign, 
+            finalPhoneNumber, 
+            finalDni, 
+            finalPhotoUrl, 
+            finalVoucherNumber,
+        ]);
+
+        res.status(201).json({
+            message: 'Registro exitoso.',
+            registerId: newRegisterId,
+        });
+
+    } catch (error) {
+        // Asumimos que los errores aquí son de DB (ej. violación de clave única)
+        console.error('Error en el registro simple:', error);
+        res.status(500).json({ message: 'Error interno del servidor durante el registro simple.' });
+    }
+});
 
 export default publicRouter;
