@@ -21,7 +21,7 @@ const allowedOrigins = [
     
     // 2. Entorno de Producción (Render)
     "https://ccpremiosdic.onrender.com", // Asegúrate de que Render usa HTTPS
-    
+    "https://monsterpromo.ptm.pe/",
     // 3. Dominio Personalizado Final (AÑADIR HTTPS)
     "https://cocacolanavidadpromo.ptm.pe", // <--- ¡CORRECCIÓN CLAVE AQUÍ!
     "https://admincocacolanavidad.ptm.pe", // También corrige el de admin por si acaso
