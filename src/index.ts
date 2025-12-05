@@ -25,7 +25,7 @@ const allowedOrigins = [
     // 3. Dominio Personalizado Final (AÑADIR HTTPS)
     "https://cocacolanavidadpromo.ptm.pe", // <--- ¡CORRECCIÓN CLAVE AQUÍ!
     "https://admincocacolanavidad.ptm.pe", // También corrige el de admin por si acaso
-    
+    "https://monsterpromo.ptm.pe",
     // Para mayor seguridad durante la migración o si no estás seguro:
     "http://cocacolanavidadpromo.ptm.pe", 
 ];
