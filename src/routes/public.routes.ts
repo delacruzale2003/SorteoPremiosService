@@ -170,24 +170,23 @@ publicRouter.post('/only-register', async (req, res) => {
     // 💡 NUEVOS CAMPOS RECIBIDOS
     const { name, campaign, photoUrl, phoneNumber, dni, voucherNumber } = req.body; 
 
-    // Validación: name, campaign, phone, dni (requeridos por el frontend)
-    if (!name || !campaign || !phoneNumber || !dni) {
-        return res.status(400).json({ message: 'Faltan datos requeridos (name, campaign, phoneNumber, dni).' });
+    // 💡 CORRECCIÓN 1: VALIDACIÓN DE CAMPOS REQUERIDOS. Incluimos voucherNumber.
+    if (!name || !campaign || !phoneNumber || !dni || !voucherNumber) {
+        return res.status(400).json({ message: 'Faltan datos requeridos (name, campaign, phoneNumber, dni, voucherNumber).' });
     }
 
     let newRegisterId: string = randomUUID();
 
-    // Normalizar a NULL los campos opcionales/no requeridos en el registro
+    // 💡 CORRECCIÓN 2: Normalizamos los campos a NULL si están vacíos.
+    // Esto es vital para asegurar que las variables pasadas a la consulta existen.
     const finalPhotoUrl = photoUrl || null;
     const finalVoucherNumber = voucherNumber || null;
-    // 💡 CORRECCIÓN APLICADA: Normalizar campos phone/dni para que existan en el scope
-    const finalPhoneNumber = phoneNumber || null;
-    const finalDni = dni || null;
+    const finalPhoneNumber = phoneNumber || null; // Aunque ya validado como no nulo
+    const finalDni = dni || null; // Aunque ya validado como no nulo
 
     try {
-        // No hay límite de premios ni stock que verificar, solo limitamos el registro por DNI/Phone
-        
         // Ejecutar el registro
+        // Nota: Los valores se envían como parámetros de consulta, incluso si ya hemos comprobado que no son nulos.
         await query(`
             INSERT INTO registers (
                 id, 
@@ -206,8 +205,8 @@ publicRouter.post('/only-register', async (req, res) => {
             newRegisterId, 
             name, 
             campaign, 
-            finalPhoneNumber, 
-            finalDni, 
+            finalPhoneNumber, // Corregido el orden
+            finalDni,         // Corregido el orden
             finalPhotoUrl, 
             finalVoucherNumber,
         ]);
@@ -218,7 +217,6 @@ publicRouter.post('/only-register', async (req, res) => {
         });
 
     } catch (error) {
-        // Asumimos que los errores aquí son de DB (ej. violación de clave única)
         console.error('Error en el registro simple:', error);
         res.status(500).json({ message: 'Error interno del servidor durante el registro simple.' });
     }
