@@ -17,6 +17,12 @@ interface PrizeForDraw {
     available_stock: number;
 }
 
+// 💡 INTERFAZ PARA VERIFICACIÓN DE LÍMITE (GLOBAL)
+interface ExistingRegistration {
+    name: string;
+    prize_name: string | null; // Nombre del premio asociado (NULL si no ganó)
+}
+
 /**
  * Función para seleccionar un premio basado en su peso (stock disponible).
  */
@@ -39,15 +45,14 @@ function weightedRandom(prizes: PrizeForDraw[]): PrizeForDraw {
 }
 
 // ====================================================================
-// RUTA CRÍTICA: FORMULARIO DE RECLAMO Y ENTREGA INMEDIATA
+// RUTA 1: RECLAMO Y ENTREGA INMEDIATA (Filtra solo por DNI)
 // ====================================================================
 
 /**
  * Endpoint para el registro del usuario y entrega del premio.
- * Body esperado: { name: string, storeId: string, campaign: string, photoUrl?: string, phoneNumber?: string, dni?: string }
+ * Body esperado: { name, storeId, campaign, photoUrl, phoneNumber, dni }
  */
 publicRouter.post('/claim', async (req, res) => {
-    // RECIBIMOS DNI
     const { name, storeId, campaign, photoUrl, phoneNumber, dni } = req.body; 
 
     // Validación Básica (requeridos para cualquier registro)
@@ -62,36 +67,36 @@ publicRouter.post('/claim', async (req, res) => {
     // Normalizar a NULL si están vacíos o no existen en el body
     const finalPhotoUrl = photoUrl || null;
     const finalPhoneNumber = phoneNumber || null;
-    const finalDni = dni || null; // Normalizar DNI
+    const finalDni = dni || null; 
 
 
     try {
-        // === VERIFICACIÓN DE LÍMITE POR PERSONA ===
+        // === VERIFICACIÓN DE LÍMITE POR DNI (ÚNICO IDENTIFICADOR) ===
+        // Consulta para obtener detalles del registro existente
+        const [existingRegistrationsRows] = await query(`
+            SELECT 
+                r.name, 
+                p.name AS prize_name
+            FROM registers r
+            LEFT JOIN prizes p ON r.prize_id = p.id
+            WHERE r.dni = ? AND r.campaign = ?;
+        `, [finalDni, campaign]);
         
-        // Ejecutar la consulta de verificación de límite
-        // Buscamos cualquier registro existente en la campaña que coincida con CUALQUIERA
-        // de los identificadores proporcionados (DNI, Teléfono, Nombre).
-        const [countRows] = await query(`
-            SELECT COUNT(id) AS prize_count FROM registers 
-            WHERE campaign = ? AND (
-                -- Coincidencia por DNI (si se proporcionó un DNI)
-                (dni IS NOT NULL AND dni = ?) OR 
-                
-                -- Coincidencia por Teléfono (si se proporcionó un Teléfono)+
-                (phone_number IS NOT NULL AND phone_number = ?) OR
-                
-                -- Coincidencia por Nombre (solo si DNI y Teléfono NO están presentes en el registro)
-                (name = ? AND dni IS NULL AND phone_number IS NULL)
-            );
-        `, [campaign, finalDni, finalPhoneNumber, name]); // Pasamos los tres identificadores
-
+        const existingRegistrations = existingRegistrationsRows as ExistingRegistration[];
         
-        const countResult = (countRows as { prize_count: number }[])[0].prize_count;
-        
-        if (countResult >= MAX_PRIZES_PER_PERSON) {
-            // No se devuelve el identificador al usuario por seguridad/privacidad
+        if (existingRegistrations.length >= MAX_PRIZES_PER_PERSON) {
+            
+            const existing = existingRegistrations[0]; 
+            
+            // CONSTRUCCIÓN DEL MENSAJE DETALLADO PARA EL FRONTEND
             return res.status(403).json({ 
-                message: `Límite alcanzado. Ya has reclamado ${MAX_PRIZES_PER_PERSON} premio(s) en esta campaña.` 
+                message: 'Ya ha sido registrado.',
+                details: {
+                    user: existing.name || 'Usuario desconocido',
+                    prize: existing.prize_name || 'Participó / No ganó',
+                    count: existingRegistrations.length,
+                    limit: MAX_PRIZES_PER_PERSON,
+                }
             });
         }
         // =======================================================
@@ -107,7 +112,6 @@ publicRouter.post('/claim', async (req, res) => {
         const availablePrizes = availablePrizesRows as PrizeForDraw[];
 
         if (availablePrizes.length === 0) {
-            // 💡 NOTA: Podrías intentar asignar un premio "No ganó" si tu lógica lo permite.
             return res.status(409).json({ message: 'Lo sentimos, los premios para esta tienda se han agotado.' });
         }
 
@@ -120,7 +124,7 @@ publicRouter.post('/claim', async (req, res) => {
 
         await transaction(async (connection) => {
             
-            // 1. VERIFICAR y BLOQUEAR la fila del premio GANADOR.
+            // 1. VERIFICAR y BLOQUEAR
             const [prizeCheckRows] = await connection.execute(`
                 SELECT available_stock
                 FROM prizes
@@ -129,11 +133,10 @@ publicRouter.post('/claim', async (req, res) => {
             `, [assignedPrizeId]);
             
             if ((prizeCheckRows as any[]).length === 0) {
-                // Si otro hilo tomó el último stock después del sorteo.
                 throw new Error('STOCK_LOST'); 
             }
 
-            // 2. Decrementar el stock disponible atómicamente
+            // 2. Decrementar el stock
             await connection.execute(`
                 UPDATE prizes
                 SET available_stock = available_stock - 1,
@@ -141,7 +144,7 @@ publicRouter.post('/claim', async (req, res) => {
                 WHERE id = ?;
             `, [assignedPrizeId]);
 
-            // 3. Registrar la entrega (USANDO LOS NOMBRES DE COLUMNAS CORRECTOS)
+            // 3. Registrar la entrega (con storeId y prizeId)
             await connection.execute(`
                 INSERT INTO registers (id, name, store_id, prize_id, campaign, status, photo_url, phone_number, dni)
                 VALUES (?, ?, ?, ?, ?, 'CLAIMED', ?, ?, ?);
