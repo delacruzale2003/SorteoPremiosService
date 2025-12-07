@@ -77,7 +77,7 @@ publicRouter.post('/claim', async (req, res) => {
                 -- Coincidencia por DNI (si se proporcionó un DNI)
                 (dni IS NOT NULL AND dni = ?) OR 
                 
-                -- Coincidencia por Teléfono (si se proporcionó un Teléfono)
+                -- Coincidencia por Teléfono (si se proporcionó un Teléfono)+
                 (phone_number IS NOT NULL AND phone_number = ?) OR
                 
                 -- Coincidencia por Nombre (solo si DNI y Teléfono NO están presentes en el registro)
@@ -170,23 +170,36 @@ publicRouter.post('/only-register', async (req, res) => {
     // 💡 NUEVOS CAMPOS RECIBIDOS
     const { name, campaign, photoUrl, phoneNumber, dni, voucherNumber } = req.body; 
 
-    // 💡 CORRECCIÓN 1: VALIDACIÓN DE CAMPOS REQUERIDOS. Incluimos voucherNumber.
+    // Validación: name, campaign, phone, dni, voucherNumber (requeridos por el frontend)
     if (!name || !campaign || !phoneNumber || !dni || !voucherNumber) {
         return res.status(400).json({ message: 'Faltan datos requeridos (name, campaign, phoneNumber, dni, voucherNumber).' });
     }
 
     let newRegisterId: string = randomUUID();
 
-    // 💡 CORRECCIÓN 2: Normalizamos los campos a NULL si están vacíos.
-    // Esto es vital para asegurar que las variables pasadas a la consulta existen.
+    // Normalizar a NULL si están vacíos o no existen en el body
     const finalPhotoUrl = photoUrl || null;
     const finalVoucherNumber = voucherNumber || null;
-    const finalPhoneNumber = phoneNumber || null; // Aunque ya validado como no nulo
-    const finalDni = dni || null; // Aunque ya validado como no nulo
+    const finalPhoneNumber = phoneNumber || null; 
+    const finalDni = dni || null; 
 
     try {
+        // === VERIFICACIÓN DE UNICIDAD DEL VOUCHER ===
+        const [voucherCheckRows] = await query(`
+            SELECT id FROM registers 
+            WHERE voucher_number = ? AND campaign = ?;
+        `, [finalVoucherNumber, campaign]);
+        
+        if ((voucherCheckRows as any[]).length > 0) {
+            // Si ya existe un registro con este número de comprobante en esta campaña
+            return res.status(409).json({ 
+                message: 'El número de comprobante ya ha sido registrado en esta campaña.' 
+            });
+        }
+        // ============================================================
+
+
         // Ejecutar el registro
-        // Nota: Los valores se envían como parámetros de consulta, incluso si ya hemos comprobado que no son nulos.
         await query(`
             INSERT INTO registers (
                 id, 
@@ -205,8 +218,8 @@ publicRouter.post('/only-register', async (req, res) => {
             newRegisterId, 
             name, 
             campaign, 
-            finalPhoneNumber, // Corregido el orden
-            finalDni,         // Corregido el orden
+            finalPhoneNumber, 
+            finalDni, 
             finalPhotoUrl, 
             finalVoucherNumber,
         ]);
@@ -218,6 +231,10 @@ publicRouter.post('/only-register', async (req, res) => {
 
     } catch (error) {
         console.error('Error en el registro simple:', error);
+        // 💡 CORRECCIÓN TIPO UNKNOWN Y ER_DUP_ENTRY
+        if (error instanceof Error && 'code' in error && (error as any).code === 'ER_DUP_ENTRY') {
+             return res.status(409).json({ message: 'Error de unicidad. El comprobante o DNI ya existe.' });
+        }
         res.status(500).json({ message: 'Error interno del servidor durante el registro simple.' });
     }
 });
