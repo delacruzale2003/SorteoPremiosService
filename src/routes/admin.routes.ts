@@ -458,7 +458,7 @@ adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
     const storeIdFilter = req.query.storeId as string | undefined;
     
     // 💡 DETERMINAR LÍMITE: Si se pasa un valor grande (ej. 99999) o '0' para descarga, se ignora el LIMIT.
-    const requestedLimit = parseInt(req.query.limit as string) || 40;
+    const requestedLimit = parseInt(req.query.limit as string) || 50;
     const isDownload = requestedLimit > 1000 || requestedLimit === 0; // Se considera descarga si el límite es muy alto o cero
     
     let whereConditions: string[] = [];
