@@ -176,12 +176,10 @@ adminRouter.put('/stores/:id', async (req: Request, res: Response) => {
         
         // CORRECCIÓN CLAVE: Desestructuramos el array de resultados y forzamos el tipado.
         // La función query devuelve Promise<[T[], any]>. resultsArray[0] es el ResultSetHeader.
-        const [resultsArray] = await query(sql, params); 
+       const [result] = await query(sql, params); 
         
-        // Forzamos el tipado del primer elemento del array a ResultSetHeader.
-        // Se usa 'as unknown as' para superar la restricción de solapamiento si T es 'unknown[]'
-        const resultHeader = resultsArray[0] as unknown as ResultSetHeader; 
-        
+        // Casteamos directamente 'result' (no result[0])
+        const resultHeader = result as unknown as ResultSetHeader;
         // --- 3. Verificación de Filas Afectadas ---
         if (resultHeader.affectedRows === 0) {
              return sendResponse(res, {
