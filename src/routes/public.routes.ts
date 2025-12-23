@@ -242,4 +242,108 @@ publicRouter.post('/only-register', async (req, res) => {
     }
 });
 
+publicRouter.post('/spin-roulette', async (req, res) => {
+    // Solo necesitamos saber en qué tienda están y qué campaña es
+    const { storeId, campaign } = req.body; 
+
+    // Validación mínima
+    if (!storeId || !campaign) {
+        return res.status(400).json({ message: 'Faltan datos requeridos (storeId, campaign).' });
+    }
+
+    let prizeName = 'N/A';
+    let assignedPrizeId: string;
+    // Generamos el ID del registro nosotros mismos
+    let newRegisterId: string = randomUUID(); 
+
+    // Datos autogenerados para mantener la consistencia de la base de datos
+    // Usamos un placeholder para el nombre ya que no hay input de usuario
+    const anonymousName = `Cliente Ruleta - ${new Date().toLocaleTimeString()}`; 
+
+    try {
+        // === PASO 1: SELECCIÓN DE PREMIO (Igual que antes) ===
+        const [availablePrizesRows] = await query<PrizeForDraw>(`
+            SELECT id, name, available_stock 
+            FROM prizes 
+            WHERE store_id = ? AND available_stock > 0;
+        `, [storeId]);
+        
+        const availablePrizes = availablePrizesRows as PrizeForDraw[];
+
+        if (availablePrizes.length === 0) {
+            return res.status(409).json({ message: 'Lo sentimos, los premios para esta tienda se han agotado.' });
+        }
+
+        // Algoritmo de peso para elegir el ganador
+        const winningPrize = weightedRandom(availablePrizes);
+        
+        assignedPrizeId = winningPrize.id;
+        prizeName = winningPrize.name;
+
+        // === PASO 2: TRANSACCIÓN (Descontar stock y registrar) ===
+        // Es vital mantener la transacción para evitar condiciones de carrera si 2 personas giran a la vez
+        await transaction(async (connection) => {
+            
+            // A. Bloquear fila del premio para asegurar stock
+            const [prizeCheckRows] = await connection.execute(`
+                SELECT available_stock
+                FROM prizes
+                WHERE id = ? AND available_stock > 0
+                FOR UPDATE;
+            `, [assignedPrizeId]);
+            
+            if ((prizeCheckRows as any[]).length === 0) {
+                throw new Error('STOCK_LOST'); 
+            }
+
+            // B. Decrementar stock
+            await connection.execute(`
+                UPDATE prizes
+                SET available_stock = available_stock - 1,
+                    updated_at = NOW()
+                WHERE id = ?;
+            `, [assignedPrizeId]);
+
+            // C. Crear el registro ANÓNIMO
+            // Pasamos NULL a phone, dni, photo_url, voucher_number
+            // Asignamos el nombre genérico
+            await connection.execute(`
+                INSERT INTO registers (
+                    id, 
+                    name, 
+                    store_id, 
+                    prize_id, 
+                    campaign, 
+                    status, 
+                    photo_url, 
+                    phone_number, 
+                    dni,
+                    voucher_number
+                )
+                VALUES (?, ?, ?, ?, ?, 'CLAIMED', NULL, NULL, NULL, NULL);
+            `, [newRegisterId, anonymousName, storeId, assignedPrizeId, campaign]);
+        });
+
+        // Respuesta exitosa al frontend
+        res.status(200).json({
+            message: '¡Premio obtenido!',
+            prize: prizeName,
+            registerId: newRegisterId,
+            // Puedes devolver un flag para que el front sepa que fue anónimo
+            isAnonymous: true 
+        });
+
+    } catch (error) {
+        if (error instanceof Error) {
+            // Manejo de concurrencia: si el stock se fue justo en el milisegundo entre la selección y la transacción
+            if (error.message === 'NO_STOCK' || error.message === 'STOCK_LOST') {
+                return res.status(409).json({ message: 'El premio seleccionado se agotó en este instante. Por favor gira de nuevo.' });
+            }
+        }
+        
+        console.error('Error en la ruleta anónima:', error);
+        res.status(500).json({ message: 'Error interno al procesar el giro.' });
+    }
+});
+
 export default publicRouter;
