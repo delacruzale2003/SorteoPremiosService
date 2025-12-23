@@ -27,7 +27,9 @@ const allowedOrigins = [
     "https://admincocacolanavidad.ptm.pe", // También corrige el de admin por si acaso
     "https://monsterpromo.ptm.pe",
     // Para mayor seguridad durante la migración o si no estás seguro:
-    "http://cocacolanavidadpromo.ptm.pe", 
+    "http://cocacolanavidadpromo.ptm.pe",
+    "https://ruleta-grfu.onrender.com",
+    "https://ruletasodimac.ptm.pe"
 ];
 
 
