@@ -14,36 +14,34 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 // Habilitar CORS
+// 1. Asegúrate de que NO haya espacios o barras finales en los strings
 const allowedOrigins = [
-    // 1. Entorno de Desarrollo (HTTP)
     "http://localhost:5173", 
     "http://localhost:5174",
-    
-    // 2. Entorno de Producción (Render)
-    "https://ccpremiosdic.onrender.com", // Asegúrate de que Render usa HTTPS
-    
-    // 3. Dominio Personalizado Final (AÑADIR HTTPS)
-    "https://cocacolanavidadpromo.ptm.pe", // <--- ¡CORRECCIÓN CLAVE AQUÍ!
-    "https://admincocacolanavidad.ptm.pe", // También corrige el de admin por si acaso
+    "https://ccpremiosdic.onrender.com",
+    "https://cocacolanavidadpromo.ptm.pe",
+    "https://admincocacolanavidad.ptm.pe",
     "https://monsterpromo.ptm.pe",
-    // Para mayor seguridad durante la migración o si no estás seguro:
     "http://cocacolanavidadpromo.ptm.pe",
+    "https://ruletainkachips.onrender.com", // <--- Tu origen actual
     "https://ruleta-grfu.onrender.com",
-    "https://ruletasodimac.ptm.pe",
-    "https://ruletainkachips.onrender.com"
+    "https://ruletasodimac.ptm.pe"
 ];
 
-
 app.use(cors({
-  origin: (origin, callback) => {
+    origin: (origin, callback) => {
+        // Si no hay origin (como en herramientas de Postman o server-to-server) 
+        // o si está en la lista blanca:
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'), false);
+            console.error(`CORS bloqueado para el origen: ${origin}`); // Útil para ver logs en Render
+            callback(new Error('Not allowed by CORS'));
         }
     },
-  methods: ["GET", "POST","PUT", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+    methods: ["GET", "POST", "PUT", "PATCH", "OPTIONS"], // Añadido OPTIONS
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"], // Añadido X-Requested-With
+    credentials: true // Recomendado para evitar problemas de sesión/headers
 }));
 
 // Endpoint de prueba
