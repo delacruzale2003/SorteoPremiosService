@@ -133,6 +133,43 @@ adminRouter.get('/stores', async (req: Request, res: Response) => {
         }, 500);
     }
 });
+adminRouter.get('/stores/:id', async (req: Request, res: Response) => {
+    const { id } = req.params;
+
+    try {
+        const sql = `
+            SELECT id, name, campaign, is_active 
+            FROM stores 
+            WHERE id = ? AND is_active = TRUE 
+            LIMIT 1;
+        `.trim();
+
+        const [result] = await query(sql, [id]);
+        
+        // La consulta SELECT devuelve un array. Si no hay nada, el array está vacío.
+        const store = (result as any[])[0];
+
+        if (!store) {
+            return sendResponse(res, {
+                success: false,
+                message: 'Tienda no encontrada o está inactiva.',
+            }, 404);
+        }
+
+        sendResponse(res, {
+            success: true,
+            message: 'Información de la tienda obtenida.',
+            data: store, // Esto enviará { id, name, campaign, is_active }
+        });
+    } catch (error: any) {
+        logError(`GET /stores/${id}`, error);
+        sendResponse(res, {
+            success: false,
+            message: 'Error al obtener la información de la tienda.',
+            error: { code: 'STORE_FETCH_SINGLE_ERROR', details: error.message },
+        }, 500);
+    }
+});
 adminRouter.put('/stores/:id', async (req: Request, res: Response) => {
     const storeId = req.params.id;
     const { name, campaign } = req.body;
