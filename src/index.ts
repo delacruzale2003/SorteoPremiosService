@@ -29,7 +29,8 @@ const allowedOrigins = [
     // Para mayor seguridad durante la migración o si no estás seguro:
     "http://cocacolanavidadpromo.ptm.pe",
     "https://ruleta-grfu.onrender.com",
-    "https://ruletasodimac.ptm.pe"
+    "https://ruletasodimac.ptm.pe",
+    "https://ruletainkachips.onrender.com"
 ];
 
 
