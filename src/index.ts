@@ -25,7 +25,9 @@ const allowedOrigins = [
     "http://cocacolanavidadpromo.ptm.pe",
     "https://ruletainkachips.onrender.com", // <--- Tu origen actual
     "https://ruleta-grfu.onrender.com",
-    "https://ruletasodimac.ptm.pe"
+    "https://ruletasodimac.ptm.pe",
+    "https://adminflashlyte.ptm.pe",
+    "https://flashlyteenero.onrender.com"
 ];
 
 app.use(cors({
