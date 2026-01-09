@@ -494,7 +494,7 @@ adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
     
     // 💡 DETERMINAR LÍMITE: Si se pasa un valor grande (ej. 99999) o '0' para descarga, se ignora el LIMIT.
     const requestedLimit = parseInt(req.query.limit as string) || 50;
-    const isDownload = requestedLimit > 1000 || requestedLimit === 0; // Se considera descarga si el límite es muy alto o cero
+    const isDownload = requestedLimit > 1000 || requestedLimit === 0; 
     
     let whereConditions: string[] = [];
     let queryParams: (string | number)[] = [];
@@ -522,14 +522,22 @@ adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
     // Cláusula LIMIT/OFFSET condicional
     let limitClause = '';
     if (!isDownload) {
-        // En modo normal de visualización, limitamos a 20 (o el requestedLimit)
         limitClause = `LIMIT ${requestedLimit}`;
     }
 
     try {
+        // 👇 AQUÍ AGREGUÉ r.email
         const sql = `
             SELECT 
-                r.id, r.name, r.campaign, r.created_at, r.status, r.phone_number, r.dni, r.photo_url ,
+                r.id, 
+                r.name, 
+                r.campaign, 
+                r.created_at, 
+                r.status, 
+                r.phone_number, 
+                r.dni, 
+                r.photo_url, 
+                r.email, 
                 s.name AS store_name, 
                 p.name AS prize_name
             FROM registers r
@@ -545,7 +553,6 @@ adminRouter.get('/registers/latest', async (req: Request, res: Response) => {
         sendResponse(res, {
             success: true,
             message: 'Registros obtenidos exitosamente.',
-            // Devolvemos el array de filas completo, sin paginación extra
             data: rows,
         });
     } catch (error: any) {
