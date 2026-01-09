@@ -346,13 +346,13 @@ publicRouter.post('/spin-roulette', async (req, res) => {
     }
 });
 publicRouter.post('/register-spin', async (req, res) => {
-    // 1. Recibimos los datos del usuario + tienda y campaña
-    const { storeId, campaign, name, dni, phoneNumber } = req.body;
+    // 1. Recibimos el email en lugar de phoneNumber
+    const { storeId, campaign, name, dni, email } = req.body;
 
-    // 2. Validación estricta de datos de entrada
-    if (!storeId || !campaign || !name || !dni || !phoneNumber) {
+    // 2. Validación estricta incluyendo el nuevo campo
+    if (!storeId || !campaign || !name || !dni || !email) {
         return res.status(400).json({ 
-            message: 'Faltan datos requeridos (storeId, campaign, name, dni, phoneNumber).' 
+            message: 'Faltan datos requeridos (storeId, campaign, name, dni, email).' 
         });
     }
 
@@ -361,7 +361,7 @@ publicRouter.post('/register-spin', async (req, res) => {
     let newRegisterId: string = randomUUID();
 
     try {
-        // === PASO 1: SELECCIÓN DE PREMIO (Lógica intacta) ===
+        // === PASO 1: SELECCIÓN DE PREMIO ===
         const [availablePrizesRows] = await query<PrizeForDraw>(`
             SELECT id, name, available_stock 
             FROM prizes 
@@ -374,16 +374,13 @@ publicRouter.post('/register-spin', async (req, res) => {
             return res.status(409).json({ message: 'Lo sentimos, los premios para esta tienda se han agotado.' });
         }
 
-        // Algoritmo de peso para elegir el ganador
         const winningPrize = weightedRandom(availablePrizes);
-        
         assignedPrizeId = winningPrize.id;
         prizeName = winningPrize.name;
 
-        // === PASO 2: TRANSACCIÓN (Descontar stock y registrar DATOS REALES) ===
+        // === PASO 2: TRANSACCIÓN ===
         await transaction(async (connection) => {
             
-            // A. Bloquear fila del premio para asegurar stock (Concurrency Lock)
             const [prizeCheckRows] = await connection.execute(`
                 SELECT available_stock
                 FROM prizes
@@ -395,7 +392,6 @@ publicRouter.post('/register-spin', async (req, res) => {
                 throw new Error('STOCK_LOST'); 
             }
 
-            // B. Decrementar stock
             await connection.execute(`
                 UPDATE prizes
                 SET available_stock = available_stock - 1,
@@ -403,8 +399,7 @@ publicRouter.post('/register-spin', async (req, res) => {
                 WHERE id = ?;
             `, [assignedPrizeId]);
 
-            // C. Crear el registro con DATOS REALES
-            // Aquí inyectamos name, phoneNumber y dni que vinieron del body
+            // C. Crear el registro con el campo EMAIL
             await connection.execute(`
                 INSERT INTO registers (
                     id, 
@@ -414,40 +409,36 @@ publicRouter.post('/register-spin', async (req, res) => {
                     campaign, 
                     status, 
                     photo_url, 
-                    phone_number, 
+                    email, 
                     dni,
-                    voucher_number,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, 'CLAIMED', NULL, ?, ?, NULL, NOW());
+                VALUES (?, ?, ?, ?, ?, 'CLAIMED', NULL, ?, ?, NOW());
             `, [
                 newRegisterId, 
-                name,          // Nombre real
+                name, 
                 storeId, 
                 assignedPrizeId, 
                 campaign, 
-                phoneNumber,   // Teléfono real
-                dni            // DNI real
+                email, // Nuevo campo inyectado
+                dni
             ]);
         });
 
-        // Respuesta exitosa al frontend
         res.status(200).json({
             success: true,
             message: '¡Registro exitoso y premio asignado!',
             prize: prizeName,
             registerId: newRegisterId,
-            customer: { name, dni } // Confirmación de datos recibidos
+            customer: { name, email } 
         });
 
     } catch (error) {
         if (error instanceof Error) {
-            // Manejo de concurrencia: si el stock se fue justo en el milisegundo entre la selección y la transacción
             if (error.message === 'NO_STOCK' || error.message === 'STOCK_LOST') {
                 return res.status(409).json({ message: 'El premio seleccionado se agotó en este instante. Por favor intenta de nuevo.' });
             }
         }
-        
         console.error('Error en el registro con ruleta:', error);
         res.status(500).json({ message: 'Error interno al procesar el registro.' });
     }
