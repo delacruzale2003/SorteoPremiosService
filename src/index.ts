@@ -27,7 +27,9 @@ const allowedOrigins = [
     "https://ruleta-grfu.onrender.com",
     "https://ruletasodimac.ptm.pe",
     "https://adminflashlyte.ptm.pe",
-    "https://flashlyteenero.onrender.com"
+    "https://flashlyteenero.onrender.com",
+    "https://adminsprite.ptm.pe",
+    "https://spriteenero.onrender.com"
 ];
 
 app.use(cors({
