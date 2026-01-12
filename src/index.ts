@@ -30,7 +30,7 @@ const allowedOrigins = [
     "https://flashlyteenero.onrender.com",
     "https://adminsprite.ptm.pe",
     "https://spriteenero.onrender.com",
-    "adminschweppes.ptm.pe",
+    "https://adminschweppes.ptm.pe",
     
     "https://schweppesenero.onrender.com"
 ];
