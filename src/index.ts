@@ -29,7 +29,10 @@ const allowedOrigins = [
     "https://adminflashlyte.ptm.pe",
     "https://flashlyteenero.onrender.com",
     "https://adminsprite.ptm.pe",
-    "https://spriteenero.onrender.com"
+    "https://spriteenero.onrender.com",
+    "adminschweppes.ptm.pe",
+    
+    "https://schweppesenero.onrender.com"
 ];
 
 app.use(cors({
