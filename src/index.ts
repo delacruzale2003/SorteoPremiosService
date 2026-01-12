@@ -31,7 +31,7 @@ const allowedOrigins = [
     "https://adminsprite.ptm.pe",
     "https://spriteenero.onrender.com",
     "https://adminschweppes.ptm.pe",
-    "http://adminschweppesenero.ptm.pe",
+    "https://adminschweppesenero.ptm.pe",
     "https://schweppesenero.onrender.com"
 ];
 
