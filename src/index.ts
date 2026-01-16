@@ -32,7 +32,9 @@ const allowedOrigins = [
     "https://spriteenero.onrender.com",
     "https://adminschweppes.ptm.pe",
     "https://adminschweppesenero.ptm.pe",
-    "https://schweppesenero.onrender.com"
+    "https://schweppesenero.onrender.com",
+    "https://admincocacolawc.ptm.pe",
+    "https://ccmundial.onrender.com"
 ];
 
 app.use(cors({
