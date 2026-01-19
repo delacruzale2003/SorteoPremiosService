@@ -55,7 +55,7 @@ function weightedRandom(prizes: PrizeForDraw[]): PrizeForDraw {
 publicRouter.post('/claim', async (req, res) => {
     const { name, storeId, campaign, photoUrl, phoneNumber, dni } = req.body; 
 
-    // Validación Básica (requeridos para cualquier registro)
+    // 1. Validación Básica (Instantánea)
     if (!name || !storeId || !campaign) {
         return res.status(400).json({ message: 'Faltan datos requeridos (name, storeId, campaign).' });
     }
@@ -64,31 +64,39 @@ publicRouter.post('/claim', async (req, res) => {
     let assignedPrizeId: string;
     let newRegisterId: string = randomUUID(); 
 
-    // Normalizar a NULL si están vacíos o no existen en el body
     const finalPhotoUrl = photoUrl || null;
     const finalPhoneNumber = phoneNumber || null;
     const finalDni = dni || null; 
 
-
     try {
-        // === VERIFICACIÓN DE LÍMITE POR DNI (ÚNICO IDENTIFICADOR) ===
-        // Consulta para obtener detalles del registro existente
-        const [existingRegistrationsRows] = await query(`
-            SELECT 
-                r.name, 
-                p.name AS prize_name
-            FROM registers r
-            LEFT JOIN prizes p ON r.prize_id = p.id
-            WHERE r.dni = ? AND r.campaign = ?;
-        `, [finalDni, campaign]);
+        // =======================================================
+        // PASO 1: PARALELISMO (Optimización de Latencia)
+        // Ejecutamos la validación de DNI y la búsqueda de premios AL MISMO TIEMPO.
+        // =======================================================
+        const [existingResult, prizesResult] = await Promise.all([
+            query(`
+                SELECT r.name, p.name AS prize_name
+                FROM registers r
+                LEFT JOIN prizes p ON r.prize_id = p.id
+                WHERE r.dni = ? AND r.campaign = ?;
+            `, [finalDni, campaign]),
+            query<PrizeForDraw>(`
+                SELECT id, name, available_stock 
+                FROM prizes 
+                WHERE store_id = ? AND available_stock > 0;
+            `, [storeId])
+        ]);
+
+        const existingRegistrations = existingResult as ExistingRegistration[];
+        const availablePrizes = prizesResult as PrizeForDraw[];
+
+        // =======================================================
+        // PASO 2: VALIDACIONES DE NEGOCIO
+        // =======================================================
         
-        const existingRegistrations = existingRegistrationsRows as ExistingRegistration[];
-        
+        // Verificación de límite por DNI (Gracias al índice que creaste, esto será veloz)
         if (existingRegistrations.length >= MAX_PRIZES_PER_PERSON) {
-            
             const existing = existingRegistrations[0]; 
-            
-            // CONSTRUCCIÓN DEL MENSAJE DETALLADO PARA EL FRONTEND
             return res.status(403).json({ 
                 message: 'Ya ha sido registrado.',
                 details: {
@@ -99,32 +107,23 @@ publicRouter.post('/claim', async (req, res) => {
                 }
             });
         }
-        // =======================================================
-        
 
-        // === PASO A: SELECCIÓN DE PREMIO CON SORTEO PONDERADO ===
-        const [availablePrizesRows] = await query<PrizeForDraw>(`
-            SELECT id, name, available_stock 
-            FROM prizes 
-            WHERE store_id = ? AND available_stock > 0;
-        `, [storeId]);
-        
-        const availablePrizes = availablePrizesRows as PrizeForDraw[];
-
+        // Verificación de stock disponible
         if (availablePrizes.length === 0) {
             return res.status(409).json({ message: 'Lo sentimos, los premios para esta tienda se han agotado.' });
         }
 
+        // Selección de premio ponderado (Lógica interna del servidor)
         const winningPrize = weightedRandom(availablePrizes);
-        
         assignedPrizeId = winningPrize.id;
         prizeName = winningPrize.name;
 
-        // === PASO B: INICIAR TRANSACCIÓN Y DECREMENTAR STOCK ===
-
+        // =======================================================
+        // PASO 3: TRANSACCIÓN ATÓMICA (Seguridad de Stock)
+        // =======================================================
         await transaction(async (connection) => {
             
-            // 1. VERIFICAR y BLOQUEAR
+            // 1. VERIFICAR y BLOQUEAR (FOR UPDATE evita que 2 personas ganen el mismo premio físico)
             const [prizeCheckRows] = await connection.execute(`
                 SELECT available_stock
                 FROM prizes
@@ -136,7 +135,7 @@ publicRouter.post('/claim', async (req, res) => {
                 throw new Error('STOCK_LOST'); 
             }
 
-            // 2. Decrementar el stock
+            // 2. Decrementar el stock disponible
             await connection.execute(`
                 UPDATE prizes
                 SET available_stock = available_stock - 1,
@@ -144,13 +143,14 @@ publicRouter.post('/claim', async (req, res) => {
                 WHERE id = ?;
             `, [assignedPrizeId]);
 
-            // 3. Registrar la entrega (con storeId y prizeId)
+            // 3. Registrar al ganador
             await connection.execute(`
                 INSERT INTO registers (id, name, store_id, prize_id, campaign, status, photo_url, phone_number, dni)
                 VALUES (?, ?, ?, ?, ?, 'CLAIMED', ?, ?, ?);
             `, [newRegisterId, name, storeId, assignedPrizeId, campaign, finalPhotoUrl, finalPhoneNumber, finalDni]);
         });
 
+        // Respuesta final al Frontend (React)
         res.status(200).json({
             message: '¡Premio entregado con éxito!',
             prize: prizeName,
@@ -161,7 +161,9 @@ publicRouter.post('/claim', async (req, res) => {
     } catch (error) {
         if (error instanceof Error) {
             if (error.message === 'NO_STOCK' || error.message === 'STOCK_LOST') {
-                return res.status(409).json({ message: 'Lo sentimos, los premios para esta tienda se han agotado o fueron tomados justo ahora. Inténtelo de nuevo.' });
+                return res.status(409).json({ 
+                    message: 'Lo sentimos, el premio fue tomado por otra persona justo ahora. Inténtelo de nuevo.' 
+                });
             }
         }
         
