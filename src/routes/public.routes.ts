@@ -55,10 +55,13 @@ function weightedRandom(prizes: PrizeForDraw[]): PrizeForDraw {
 publicRouter.post('/claim', async (req, res) => {
     const { name, storeId, campaign, photoUrl, phoneNumber, dni } = req.body; 
 
-    // 1. Validación Básica (Instantánea)
+    // 1. Validación Básica
     if (!name || !storeId || !campaign) {
         return res.status(400).json({ message: 'Faltan datos requeridos (name, storeId, campaign).' });
     }
+
+    // Límite de premios
+    const MAX_PRIZES_PER_PERSON = 1; 
 
     let prizeName = 'N/A';
     let assignedPrizeId: string;
@@ -71,7 +74,6 @@ publicRouter.post('/claim', async (req, res) => {
     try {
         // =======================================================
         // PASO 1: PARALELISMO (Optimización de Latencia)
-        // Ejecutamos la validación de DNI y la búsqueda de premios AL MISMO TIEMPO.
         // =======================================================
         const [existingResult, prizesResult] = await Promise.all([
             query(`
@@ -87,14 +89,15 @@ publicRouter.post('/claim', async (req, res) => {
             `, [storeId])
         ]);
 
-        const existingRegistrations = existingResult as ExistingRegistration[];
-        const availablePrizes = prizesResult as PrizeForDraw[];
+        // 🔥 CORRECCIÓN AQUÍ: Accedemos a [0] para obtener las filas reales
+        const existingRegistrations = (existingResult as any)[0] as ExistingRegistration[];
+        const availablePrizes = (prizesResult as any)[0] as PrizeForDraw[];
 
         // =======================================================
         // PASO 2: VALIDACIONES DE NEGOCIO
         // =======================================================
         
-        // Verificación de límite por DNI (Gracias al índice que creaste, esto será veloz)
+        // Verificación de límite por DNI
         if (existingRegistrations.length >= MAX_PRIZES_PER_PERSON) {
             const existing = existingRegistrations[0]; 
             return res.status(403).json({ 
@@ -113,17 +116,17 @@ publicRouter.post('/claim', async (req, res) => {
             return res.status(409).json({ message: 'Lo sentimos, los premios para esta tienda se han agotado.' });
         }
 
-        // Selección de premio ponderado (Lógica interna del servidor)
+        // Selección de premio ponderado
         const winningPrize = weightedRandom(availablePrizes);
         assignedPrizeId = winningPrize.id;
         prizeName = winningPrize.name;
 
         // =======================================================
-        // PASO 3: TRANSACCIÓN ATÓMICA (Seguridad de Stock)
+        // PASO 3: TRANSACCIÓN ATÓMICA
         // =======================================================
         await transaction(async (connection) => {
             
-            // 1. VERIFICAR y BLOQUEAR (FOR UPDATE evita que 2 personas ganen el mismo premio físico)
+            // 1. VERIFICAR y BLOQUEAR
             const [prizeCheckRows] = await connection.execute(`
                 SELECT available_stock
                 FROM prizes
@@ -135,7 +138,7 @@ publicRouter.post('/claim', async (req, res) => {
                 throw new Error('STOCK_LOST'); 
             }
 
-            // 2. Decrementar el stock disponible
+            // 2. Decrementar el stock
             await connection.execute(`
                 UPDATE prizes
                 SET available_stock = available_stock - 1,
@@ -150,7 +153,7 @@ publicRouter.post('/claim', async (req, res) => {
             `, [newRegisterId, name, storeId, assignedPrizeId, campaign, finalPhotoUrl, finalPhoneNumber, finalDni]);
         });
 
-        // Respuesta final al Frontend (React)
+        // Respuesta final
         res.status(200).json({
             message: '¡Premio entregado con éxito!',
             prize: prizeName,
