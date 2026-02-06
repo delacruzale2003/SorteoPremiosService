@@ -446,4 +446,147 @@ publicRouter.post('/register-spin', async (req, res) => {
     }
 });
 
+
+
+publicRouter.post('/register-spin-fixed', async (req, res) => {
+    // 1. Recepción de datos (Adaptado a tu nuevo flujo)
+    const { storeId, campaign, name, phone, voucherUrl } = req.body;
+
+    // 2. Validación Estricta
+    if (!storeId || !campaign || !name || !phone || !voucherUrl) {
+        return res.status(400).json({ 
+            message: 'Faltan datos requeridos (storeId, campaign, name, phone, voucherUrl).' 
+        });
+    }
+
+    // Configuración de límites (Opcional: ajústalo a tu regla de negocio)
+    const MAX_PRIZES_PER_PERSON = 1; 
+
+    let prizeName = 'N/A';
+    let assignedPrizeId: string;
+    let newRegisterId: string = randomUUID();
+
+    try {
+        // =======================================================
+        // PASO 1: PARALELISMO (Optimización)
+        // Consultamos historial del usuario (por Teléfono) y Stock al mismo tiempo
+        // =======================================================
+        const [existingResult, prizesResult] = await Promise.all([
+            query(`
+                SELECT id, created_at 
+                FROM registers 
+                WHERE phone_number = ? AND campaign = ?
+            `, [phone, campaign]),
+            query<PrizeForDraw>(`
+                SELECT id, name, available_stock, probability 
+                FROM prizes 
+                WHERE store_id = ? AND available_stock > 0
+            `, [storeId])
+        ]);
+
+        const existingRegistrations = existingResult as any[];
+        const availablePrizes = prizesResult as PrizeForDraw[];
+
+        // A. Validar si ya jugó (Bloqueo por Teléfono)
+        if (existingRegistrations.length >= MAX_PRIZES_PER_PERSON) {
+            return res.status(403).json({ 
+                message: 'Este número de teléfono ya ha participado en la campaña.',
+                success: false
+            });
+        }
+
+        // B. Validar si hay premios en la tienda
+        if (availablePrizes.length === 0) {
+            return res.status(409).json({ 
+                message: 'Lo sentimos, los premios para esta tienda se han agotado.',
+                success: false
+            });
+        }
+
+        // =======================================================
+        // PASO 2: LÓGICA DE SELECCIÓN (Weighted Random)
+        // =======================================================
+        const winningPrize = weightedRandom(availablePrizes);
+        assignedPrizeId = winningPrize.id;
+        prizeName = winningPrize.name;
+
+        // =======================================================
+        // PASO 3: TRANSACCIÓN ATÓMICA (Escritura segura)
+        // =======================================================
+        await transaction(async (connection) => {
+            
+            // 1. Bloqueo de fila (Anti-Race Condition)
+            const [prizeCheckRows] = await connection.execute(`
+                SELECT available_stock
+                FROM prizes
+                WHERE id = ? AND available_stock > 0
+                FOR UPDATE;
+            `, [assignedPrizeId]);
+            
+            if ((prizeCheckRows as any[]).length === 0) {
+                throw new Error('STOCK_LOST'); 
+            }
+
+            // 2. Restar Stock
+            await connection.execute(`
+                UPDATE prizes
+                SET available_stock = available_stock - 1,
+                    updated_at = NOW()
+                WHERE id = ?;
+            `, [assignedPrizeId]);
+
+            // 3. Insertar Registro (Mapeando los nuevos campos)
+            // Nota: photo_url recibe voucherUrl, phone_number recibe phone
+            await connection.execute(`
+                INSERT INTO registers (
+                    id, 
+                    name, 
+                    store_id, 
+                    prize_id, 
+                    campaign, 
+                    status, 
+                    photo_url, 
+                    phone_number, 
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, 'CLAIMED', ?, ?, NOW());
+            `, [
+                newRegisterId, 
+                name, 
+                storeId, 
+                assignedPrizeId, 
+                campaign, 
+                voucherUrl, // Aquí va la URL que devolvió el PHP
+                phone       // Aquí va el teléfono
+            ]);
+        });
+
+        // =======================================================
+        // PASO 4: RESPUESTA EXITOSA
+        // =======================================================
+        res.status(200).json({
+            success: true,
+            message: '¡Registro exitoso!',
+            prize: prizeName,
+            registerId: newRegisterId,
+            data: { name, phone, voucherUrl }
+        });
+
+    } catch (error) {
+        if (error instanceof Error) {
+            // Manejo específico de concurrencia
+            if (error.message === 'NO_STOCK' || error.message === 'STOCK_LOST') {
+                return res.status(409).json({ 
+                    success: false,
+                    message: 'El premio seleccionado se agotó en este instante. Por favor intenta de nuevo.' 
+                });
+            }
+        }
+        console.error('Error crítico en register-spin:', error);
+        res.status(500).json({ 
+            success: false,
+            message: 'Error interno al procesar el registro.' 
+        });
+    }
+});
 export default publicRouter;
