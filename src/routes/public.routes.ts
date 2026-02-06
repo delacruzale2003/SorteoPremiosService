@@ -452,36 +452,29 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
 
     console.log("👉 Iniciando Registro Spin:", { storeId, campaign, phone });
 
-    // 2. Validación Estricta de datos entrantes
+    // 2. Validación Estricta
     if (!storeId || !campaign || !name || !phone || !voucherUrl) {
         return res.status(400).json({ 
             message: 'Faltan datos requeridos (storeId, campaign, name, phone, voucherUrl).' 
         });
     }
 
-    // =================================================================
-    // CONFIGURACIÓN DE LÍMITES
-    // =================================================================
-    // Si estás en modo pruebas, puedes subir esto a 100 para no bloquearte
     const MAX_PRIZES_PER_PERSON = 1; 
-
     let prizeName = 'N/A';
     let assignedPrizeId: string;
     let newRegisterId: string = randomUUID();
 
     try {
         // =======================================================
-        // PASO 1: CONSULTAS EN PARALELO (Validación y Stock)
+        // PASO 1: CONSULTAS EN PARALELO
         // =======================================================
         const [existingResult, prizesResult] = await Promise.all([
-            // A. Buscamos si el teléfono ya existe para esta campaña
             query(`
-                SELECT id, created_at, status 
+                SELECT id 
                 FROM registers 
                 WHERE phone_number = ? AND campaign = ?
             `, [phone, campaign]),
             
-            // B. Buscamos premios con stock (SIN la columna probability)
             query<PrizeForDraw>(`
                 SELECT id, name, available_stock 
                 FROM prizes 
@@ -489,24 +482,29 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
             `, [storeId])
         ]);
 
-        const existingRegistrations = existingResult as any[];
-        const availablePrizes = prizesResult as PrizeForDraw[];
+        // 🔥 CORRECCIÓN CRÍTICA AQUÍ 🔥
+        // La librería mysql devuelve [rows, fields]. 
+        // existingResult es [ [],FieldPacket ]. Su length es 2.
+        // Necesitamos existingResult[0] para ver las filas reales.
+        
+        const existingRegistrations = (existingResult as any)[0] as any[]; 
+        const availablePrizes = (prizesResult as any)[0] as PrizeForDraw[];
 
-        // --- DEPURACIÓN EN CONSOLA ---
-        if (existingRegistrations.length > 0) {
-            console.warn("⚠️ BLOQUEO: Se encontraron registros previos para este teléfono:", existingRegistrations);
-        }
-        // -----------------------------
+        console.log("🔍 Registros encontrados:", existingRegistrations.length);
+        console.log("🎁 Premios disponibles:", availablePrizes.length);
 
-        // 3. Validar límite por persona (teléfono)
+        // --- VALIDACIONES DE NEGOCIO ---
+
+        // 1. Validar límite por persona
         if (existingRegistrations.length >= MAX_PRIZES_PER_PERSON) {
+            console.warn(`⛔ Bloqueo: El número ${phone} ya tiene ${existingRegistrations.length} registros.`);
             return res.status(403).json({ 
                 success: false,
-                message: `Este número (${phone}) ya ha participado en la campaña.` 
+                message: 'Este número de teléfono ya ha participado en la campaña.' 
             });
         }
 
-        // 4. Validar si hay stock
+        // 2. Validar si hay stock
         if (availablePrizes.length === 0) {
             return res.status(409).json({ 
                 success: false,
@@ -515,7 +513,7 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
         }
 
         // =======================================================
-        // PASO 2: SORTEO (Weighted Random)
+        // PASO 2: LÓGICA DE SELECCIÓN
         // =======================================================
         const winningPrize = weightedRandom(availablePrizes);
         assignedPrizeId = winningPrize.id;
@@ -527,7 +525,7 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
         // PASO 3: TRANSACCIÓN ATÓMICA
         // =======================================================
         await transaction(async (connection) => {
-            // A. Bloqueo de fila (FOR UPDATE)
+            // A. Bloqueo de fila
             const [prizeCheckRows] = await connection.execute(`
                 SELECT available_stock FROM prizes WHERE id = ? AND available_stock > 0 FOR UPDATE;
             `, [assignedPrizeId]);
@@ -553,26 +551,32 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
         });
 
         // =======================================================
-        // PASO 4: RESPUESTA
+        // PASO 4: RESPUESTA EXITOSA
         // =======================================================
         res.status(200).json({
             success: true,
             message: '¡Registro exitoso!',
             prize: prizeName,
             registerId: newRegisterId,
-            data: { name, phone }
+            data: { name, phone, voucherUrl }
         });
 
     } catch (error) {
         if (error instanceof Error) {
             if (error.message === 'NO_STOCK' || error.message === 'STOCK_LOST') {
-                return res.status(409).json({ success: false, message: 'El premio se agotó en este instante. Intenta de nuevo.' });
+                return res.status(409).json({ 
+                    success: false,
+                    message: 'El premio seleccionado se agotó en este instante. Por favor intenta de nuevo.' 
+                });
             }
         }
+        
         console.error('❌ Error crítico en register-spin-fixed:', error);
-        res.status(500).json({ success: false, message: 'Error interno del servidor.' });
+        res.status(500).json({ 
+            success: false,
+            message: 'Error interno al procesar el registro.' 
+        });
     }
 });
-
 
 export default publicRouter;
