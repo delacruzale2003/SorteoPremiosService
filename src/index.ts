@@ -36,7 +36,8 @@ const allowedOrigins = [
     "https://admincocacolawc.ptm.pe",
     "https://ccmundial.onrender.com",
     "https://adminmonstertottus.ptm.pe",
-    "https://ruletamonstertottus.onrender.com"
+    "https://ruletamonstertottus.onrender.com",
+    "https://ruletasodimac.onrender.com"
 ];
 
 app.use(cors({
