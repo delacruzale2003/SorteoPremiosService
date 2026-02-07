@@ -37,7 +37,9 @@ const allowedOrigins = [
     "https://ccmundial.onrender.com",
     "https://adminmonstertottus.ptm.pe",
     "https://ruletamonstertottus.onrender.com",
-    "https://ruletasodimac.onrender.com"
+    "https://ruletasodimac.onrender.com",
+    "https://adminsanluispoweradefebrero.ptm.pe",
+    "https://sanluisfebrero.onrender.com"
 ];
 
 app.use(cors({
