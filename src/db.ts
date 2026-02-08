@@ -6,7 +6,7 @@ dotenv.config();
 // 💡 RECOMENDACIÓN: Si usas una base de datos compartida (ej. PlanetScale o plan gratuito), 
 // 30 conexiones pueden ser muchas y causar errores de "Too many connections". 
 // Si es un VPS dedicado, 30 está bien. Para planes gratis, mejor 5 o 10.
-const DEFAULT_CONNECTION_LIMIT = 10; 
+const DEFAULT_CONNECTION_LIMIT = 20; 
 
 const dbConfig: ConnectionOptions = {
     host: process.env.DB_HOST,
