@@ -40,7 +40,9 @@ const allowedOrigins = [
     "https://ruletasodimac.onrender.com",
     "https://adminsanluispoweradefebrero.ptm.pe",
     "https://sanluisfebrero.onrender.com",
-    "https://schweppesfebrero.onrender.com"
+    "https://schweppesfebrero.onrender.com",
+    "https://adminruletaincakola.ptm.pe",
+    "https://ruletaincakola.onrender.com"
 ];
 
 app.use(cors({
