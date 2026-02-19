@@ -450,12 +450,12 @@ publicRouter.post('/register-spin', async (req, res) => {
 });
 
 publicRouter.post('/register-spin-fixed', async (req, res) => {
-    // 1. Recepción de datos
-    const { storeId, campaign, name, phone, voucherUrl } = req.body;
+    // 1. Recepción de datos (dni es opcional para retrocompatibilidad)
+    const { storeId, campaign, name, phone, voucherUrl, dni } = req.body;
 
-    console.log("👉 Iniciando Registro Spin:", { storeId, campaign, phone });
+    console.log("👉 Iniciando Registro Spin:", { storeId, campaign, phone, dni: dni || 'N/A' });
 
-    // 2. Validación Estricta
+    // 2. Validación Estricta de campos base
     if (!storeId || !campaign || !name || !phone || !voucherUrl) {
         return res.status(400).json({ 
             message: 'Faltan datos requeridos (storeId, campaign, name, phone, voucherUrl).' 
@@ -465,19 +465,24 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
     const MAX_PRIZES_PER_PERSON = 1; 
     let prizeName = 'N/A';
     let assignedPrizeId: string;
-    let newRegisterId: string = randomUUID();
+    let newRegisterId = randomUUID();
 
     try {
         // =======================================================
         // PASO 1: CONSULTAS EN PARALELO
         // =======================================================
+        
+        // Construimos la query de validación dinámicamente
+        // Si hay DNI, buscamos por (teléfono OR dni). Si no, solo por teléfono.
+        const checkUserQuery = `
+            SELECT id FROM registers 
+            WHERE (phone_number = ? ${dni ? 'OR dni = ?' : ''}) 
+            AND campaign = ?
+        `;
+        const checkUserParams = dni ? [phone, dni, campaign] : [phone, campaign];
+
         const [existingResult, prizesResult] = await Promise.all([
-            query(`
-                SELECT id 
-                FROM registers 
-                WHERE phone_number = ? AND campaign = ?
-            `, [phone, campaign]),
-            
+            query(checkUserQuery, checkUserParams),
             query<PrizeForDraw>(`
                 SELECT id, name, available_stock 
                 FROM prizes 
@@ -485,29 +490,18 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
             `, [storeId])
         ]);
 
-        // 🔥 CORRECCIÓN CRÍTICA AQUÍ 🔥
-        // La librería mysql devuelve [rows, fields]. 
-        // existingResult es [ [],FieldPacket ]. Su length es 2.
-        // Necesitamos existingResult[0] para ver las filas reales.
-        
         const existingRegistrations = (existingResult as any)[0] as any[]; 
         const availablePrizes = (prizesResult as any)[0] as PrizeForDraw[];
 
-        console.log("🔍 Registros encontrados:", existingRegistrations.length);
-        console.log("🎁 Premios disponibles:", availablePrizes.length);
-
         // --- VALIDACIONES DE NEGOCIO ---
 
-        // 1. Validar límite por persona
         if (existingRegistrations.length >= MAX_PRIZES_PER_PERSON) {
-            console.warn(`⛔ Bloqueo: El número ${phone} ya tiene ${existingRegistrations.length} registros.`);
             return res.status(403).json({ 
                 success: false,
-                message: 'Este número de teléfono ya ha participado en la campaña.' 
+                message: 'Ya has participado en esta campaña.' 
             });
         }
 
-        // 2. Validar si hay stock
         if (availablePrizes.length === 0) {
             return res.status(409).json({ 
                 success: false,
@@ -521,8 +515,6 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
         const winningPrize = weightedRandom(availablePrizes);
         assignedPrizeId = winningPrize.id;
         prizeName = winningPrize.name;
-
-        console.log("🏆 Premio seleccionado:", prizeName);
 
         // =======================================================
         // PASO 3: TRANSACCIÓN ATÓMICA
@@ -540,15 +532,15 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
                 UPDATE prizes SET available_stock = available_stock - 1, updated_at = NOW() WHERE id = ?;
             `, [assignedPrizeId]);
 
-            // C. Insertar Registro
+            // C. Insertar Registro (Incluimos el campo dni)
             await connection.execute(`
                 INSERT INTO registers (
-                    id, name, store_id, prize_id, campaign, status, 
+                    id, name, dni, store_id, prize_id, campaign, status, 
                     photo_url, phone_number, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, 'CLAIMED', ?, ?, NOW());
+                VALUES (?, ?, ?, ?, ?, ?, 'CLAIMED', ?, ?, NOW());
             `, [
-                newRegisterId, name, storeId, assignedPrizeId, campaign, 
+                newRegisterId, name, dni || null, storeId, assignedPrizeId, campaign, 
                 voucherUrl, phone
             ]);
         });
@@ -561,24 +553,18 @@ publicRouter.post('/register-spin-fixed', async (req, res) => {
             message: '¡Registro exitoso!',
             prize: prizeName,
             registerId: newRegisterId,
-            data: { name, phone, voucherUrl }
+            data: { name, phone, dni, voucherUrl }
         });
 
     } catch (error) {
-        if (error instanceof Error) {
-            if (error.message === 'NO_STOCK' || error.message === 'STOCK_LOST') {
-                return res.status(409).json({ 
-                    success: false,
-                    message: 'El premio seleccionado se agotó en este instante. Por favor intenta de nuevo.' 
-                });
-            }
+        if (error instanceof Error && (error.message === 'NO_STOCK' || error.message === 'STOCK_LOST')) {
+            return res.status(409).json({ 
+                success: false,
+                message: 'El premio se agotó en este instante. Intenta de nuevo.' 
+            });
         }
-        
-        console.error('❌ Error crítico en register-spin-fixed:', error);
-        res.status(500).json({ 
-            success: false,
-            message: 'Error interno al procesar el registro.' 
-        });
+        console.error('❌ Error crítico:', error);
+        res.status(500).json({ success: false, message: 'Error interno.' });
     }
 });
 
