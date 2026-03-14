@@ -74,48 +74,50 @@ adminRouter.post('/stores', async (req: Request, res: Response) => {
 adminRouter.get('/stores', async (req: Request, res: Response) => {
     try {
         const page = parseInt(req.query.page as string) || 1;
-        const limit = parseInt(req.query.limit as string) || 10;
+        const limit = parseInt(req.query.limit as string) || 50; // Límite sano de 50
         const offset = (page - 1) * limit;
-        // Extraemos el filtro de la URL
+        
+        // Extraemos los filtros de la URL
         const campaignFilter = req.query.campaign as string | undefined;
+        const sortFilter = req.query.sort as string | undefined; // Capturamos el sort
 
         let whereClause = '';
         const queryParams: (string | number)[] = [];
 
-        // Lógica para añadir el filtro de campaña Y el estado activo
         if (campaignFilter) {
-            // Si hay filtro de campaña, añadimos ambas condiciones con AND
             whereClause = 'WHERE campaign = ? AND is_active = TRUE';
             queryParams.push(campaignFilter);
         } else {
-            // Si NO hay filtro de campaña, solo añadimos la condición de activo
             whereClause = 'WHERE is_active = TRUE';
         }
         
-        // Parámetros para la consulta principal (LIMIT y OFFSET van al final)
+        // 💡 MAGIA AQUÍ: Ordenamiento dinámico
+        let orderByClause = 'ORDER BY created_at DESC'; // Por defecto: más recientes primero
+        if (sortFilter === 'alpha') {
+            orderByClause = 'ORDER BY name ASC'; // Si pide A-Z, cambiamos la consulta
+        }
+
+        // Parámetros para la consulta principal
         const storeQueryParams = [...queryParams, limit, offset];
 
-        // Consulta SQL LIMPIA - CORREGIDO CON .trim()
+        // Consulta SQL LIMPIA inyectando la cláusula ORDER BY
         const storesQuery = `
             SELECT id, name, campaign, is_active, created_at, updated_at
             FROM stores ${whereClause}
-            ORDER BY name ASC
+            ${orderByClause}
             LIMIT ? OFFSET ?
         `.trim();
         
-        // Consulta de conteo SQL LIMPIA - CORREGIDO CON .trim()
+        // Consulta de conteo (no necesita ordenamiento)
         const countQuery = `SELECT COUNT(id) AS count FROM stores ${whereClause}`.trim();
         
-        // El countQuery solo usa los parámetros de filtro
         const [storesResult, countResult] = await Promise.all([
             query(storesQuery, storeQueryParams),
             query(countQuery, queryParams),
         ]);
 
-        // Aseguramos que el resultado de la consulta SELECT sea RowDataPacket[]
         const stores = storesResult[0]; 
 
-        // Accedemos al conteo.
         const totalItems = (countResult[0] as { count: number }[])[0].count; 
         const totalPages = Math.ceil(totalItems / limit);
 
